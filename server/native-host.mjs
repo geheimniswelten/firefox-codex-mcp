@@ -57,7 +57,7 @@ export function createBridge({ port, token, input = process.stdin, output = proc
       reply(response, 401, error('UNAUTHORIZED', 'Bridge authentication failed.')); return;
     }
     if (request.method === 'GET' && request.url === '/health') {
-      reply(response, 200, { result: { connected: ready, version: '0.1.1' } }); return;
+      reply(response, 200, { result: { connected: ready, version: '0.1.2' } }); return;
     }
     if (request.method !== 'POST' || request.url !== '/rpc') {
       reply(response, 404, error('NOT_FOUND', 'Unknown bridge endpoint.')); return;

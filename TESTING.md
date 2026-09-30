@@ -1,8 +1,16 @@
 # Prüfstand vom 30. September 2026
 
+## Toolbar-Freigabe in Version 0.1.2
+
+Die Inhaltsfreigabe verwendet jetzt das vorhandene Add-on-Popup. Neue Tests prüfen das Aktivieren des zuletzt aktiven normalen Fensters, Wiederherstellen minimierter Fenster, den Verzicht auf Tabwechsel und zusätzliche Fenster sowie die manuelle Antwort bei fehlgeschlagenem automatischem Öffnen. Der produktive Berechtigungsprüfer wird dabei mit kontrollierten Browser-API-Antworten verwendet.
+
+Weitere Prüfungen decken die feste Zweiminutenfrist, Schließen und Wiederöffnen, abgelaufene und doppelte Antworten, Absender- und Anfrage-ID-Prüfung, parallele Anfragen, Abbruch bei Verbindungs-/Einstellungsänderungen und verspätete Popup-Aufrufe ab. Die Frontendtests prüfen Textdarstellung, Geltungsbereich, deaktivierte Schaltflächen und überholte Statusantworten; auch eine zwischen Speichern und Statusabfrage mögliche Rückkehr zu alten Einstellungen ist abgesichert.
+
+Die Änderung wurde mit Genehmigung direkt in `S:\Develop\firefox-codex-mcp` übernommen. Das laufende Benutzer-Add-on muss zum Aktivieren neu geladen werden. Der neue Popup-Anker und das Verhalten auf mehreren echten Monitoren wurden in diesem Durchlauf noch nicht am laufenden Firefox überprüft; die unten beschriebenen früheren Firefox-Tests beziehen sich auf den damaligen Stand mit eigenem Freigabefenster.
+
 ## Automatisierte Tests
 
-`node --test test/*.test.mjs`: **110 bestanden, 0 fehlgeschlagen, 2 übersprungen** (112 insgesamt). Ein Test benötigt hier gesperrte CIM-Prozessabfragen. Der zweite prüft ausdrücklich blockierte Windows-ACL-Operationen; dieser Fehlerzustand lag im Hauptlauf nicht vor. Im getrennten eingeschränkten Prüflauf wurde der sichere Abbruch bei blockierten ACL-Operationen erfolgreich geprüft.
+`node --test test/*.test.mjs`: **131 bestanden, 0 fehlgeschlagen, 2 übersprungen** (133 insgesamt). Ein Test benötigt hier gesperrte CIM-Prozessabfragen. Der zweite prüft ausdrücklich blockierte Windows-ACL-Operationen; dieser Fehlerzustand lag im Hauptlauf nicht vor. Im getrennten eingeschränkten Prüflauf wurde der sichere Abbruch bei blockierten ACL-Operationen erfolgreich geprüft. Für den aktuellen vollständigen Lauf wurden `TEMP` und `TMP` nur im Testprozess auf ein Testverzeichnis im freigegebenen Workspace gesetzt; der erste Versuch scheiterte bei PowerShell-Testdateien im nicht zugänglichen Standard-Temp-Pfad.
 
 Abgedeckt sind Firefox-Zustände und Metadaten, native Gruppen mit großen IDs, Inhaltsbegrenzung, die vier Inhaltsregeln, aktiver Tab, Navigation während der Freigabe, feste zwölfstündige Sitzungsfreigaben, Widerruf und Abbruch laufender Stapel. Die Zeitgrenzen werden mit einer kontrollierten Uhr geprüft, ohne zwölf Stunden zu warten. Hinzu kommen die Erweiterungsliste mit Statusfiltern und Pagination sowie Anfordern, Ablehnen, Widerrufen und externe Änderungen der optionalen Datenfreigabe im Symbolleistenmenü.
 
@@ -34,7 +42,7 @@ Ein **schreibfreier Probelauf** mit dem tatsächlichen Benutzerprofil und dem Pr
 
 Der Hauptlauf bestätigte im isolierten Windows-Test das tatsächliche Schreiben mit Sicherung, unveränderten übrigen Einstellungen, Wiederholung ohne doppelte Einträge und Entfernen des eigenen Eintrags. Ein separater Prüflauf mit PowerShell im eingeschränkten Sprachmodus bestätigte den anderen Fall: Bei nicht erlaubtem Setzen von Dateirechten bricht der Registrar vor dem Schreiben von Konfigurationsinhalten ab, erhält das Original und entfernt seine leeren Arbeitsdateien.
 
-Die aktuelle Sandbox erlaubt keine Änderungen am Projekt auf `S:` oder an den tatsächlichen Benutzerkonfigurationen. Die neue Version liegt als getestete Quellkopie und Paket unter `outputs`; die bisherige Installation auf `S:` wurde nicht aktualisiert. Windows-CIM-Prozessabfragen bleiben im aktuellen Hauptlauf gesperrt; der dazugehörige frühere Deinstallationstest wird nur bei der konkreten Zugriffsverweigerung `0x80041003` übersprungen. Andere Fehler werden weiterhin als Testfehler behandelt.
+Beim damaligen Durchlauf zur KI-Client-Einrichtung waren Änderungen am Projekt auf `S:` gesperrt. Die Client-Erweiterung wurde deshalb zunächst als getestete Quellkopie und Paket unter `outputs` bereitgestellt und anschließend vom Benutzer installiert. Für die aktuelle Popup-Änderung wurde Schreibzugriff auf das Projekt erteilt. Windows-CIM-Prozessabfragen bleiben im aktuellen Hauptlauf gesperrt; der dazugehörige frühere Deinstallationstest wird nur bei der konkreten Zugriffsverweigerung `0x80041003` übersprungen. Andere Fehler werden weiterhin als Testfehler behandelt.
 
 Die bereits vorhandenen, in der Lockdatei festgelegten Parser `acorn` und `js-yaml` sind jetzt Laufzeitabhängigkeiten. Dafür wurden keine neuen Pakete aus dem Netz geladen. Das Abhängigkeitsdiagramm wurde lokal geprüft; eine neue Installation per `npm ci` im echten Benutzerprojekt wurde in diesem Durchlauf nicht ausgeführt.
 

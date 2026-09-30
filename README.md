@@ -84,6 +84,10 @@ Das Popup bietet einen MCP-Ein-/Ausschalter, den Verbindungsstatus und die Inhal
 
 Seiteninhalte können **erlaubt**, **gesperrt**, **bei jedem Zugriff abgefragt** oder **einmal für eine Sitzung freigegeben** werden. Eine Sitzungsfreigabe läuft nach **festen 12 Stunden** ab; weitere Zugriffe verlängern sie nicht. Firefox-/Erweiterungsneustart und eine Änderung der Zugriffsregeln setzen die Freigabe zurück. Eine unbeantwortete Inhaltsabfrage läuft nach zwei Minuten ab.
 
+Die Freigabefrage erscheint direkt im Popup des Add-ons. Dazu wird das zuletzt aktive normale Firefox-Fenster in den Vordergrund geholt; ein minimiertes Fenster wird wiederhergestellt. Der ausgewählte Tab bleibt erhalten. Ist das Add-on nicht an die Symbolleiste angeheftet, verwendet Firefox den allgemeinen Erweiterungen-Button als Anker. Es entsteht kein zusätzliches Browserfenster.
+
+Während eine Antwort aussteht, zeigt das Add-on-Symbol ein **„?“**. Ab Firefox 149 kann das Popup automatisch geöffnet werden. In Firefox 140–148 oder wenn Firefox das Öffnen verhindert, auf das Add-on-Symbol beziehungsweise auf **Erweiterungen → Firefox ↔ Codex MCP** klicken. Das Schließen des Popups erteilt keine Freigabe: Bis zum Ablauf der ursprünglichen zwei Minuten lässt es sich erneut öffnen. Nur **Freigeben** erlaubt den Zugriff; **Ablehnen** beendet die Anfrage sofort. Quellen: [browserAction.openPopup](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/browserAction/openPopup), [Firefox 149: Aufruf ohne Benutzeraktion](https://bugzilla.mozilla.org/show_bug.cgi?id=1799344), [Fenster aktivieren](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/windows/update).
+
 Der Inhaltsumfang ist wahlweise **alle Tabs** oder **nur der aktive Tab des zuletzt aktiven Firefox-Fensters**. Standard ist **Sitzungsfreigabe + aktiver Tab**. Das bezieht sich auf das Lesen der Seite; das Auflisten von Tab-Metadaten und die ausdrücklich angeforderte Tabsteuerung bleiben bei aktivem MCP möglich. Ein anderer Tab wird nicht automatisch aktiviert, um die Inhaltsregel zu umgehen. Entladene Tabs werden durch Inhaltslesen nicht aufgeweckt.
 
 ## Werkzeuge

@@ -9,6 +9,17 @@
   </head>
   <body>
     <header><img src="icon.svg" width="36" height="36" alt=""><div><h1>Firefox ↔ Codex</h1><p>Lokale MCP-Verbindung</p></div></header>
+    <section id="approval" class="approval" aria-labelledby="approvalHeading" hidden>
+      <h2 id="approvalHeading">Seiteninhalt freigeben?</h2>
+      <strong id="approvalTitle" class="page-title"></strong>
+      <p id="approvalUrl" class="url"></p>
+      <p id="approvalDescription" class="note"></p>
+      <p class="note">Codex erhält Seitentext oder HTML und gegebenenfalls Links, auch private Inhalte.</p>
+      <div class="actions"><button id="approvalDeny" type="button" class="secondary">Ablehnen</button><button id="approvalAllow" type="button" disabled>Freigeben</button></div>
+      <p id="approvalError" class="error" role="alert" hidden></p>
+      <p class="note">Schließen lässt die Anfrage offen. Das „?“ am Add-on zeigt, dass sie erneut geöffnet werden kann. Nach 2 Minuten ohne Antwort wird sie abgelehnt.</p>
+    </section>
+    <main id="settingsPanel">
     <section aria-live="polite"><div class="status"><span id="dot" class="dot"></span><strong id="status">Verbindung wird geprüft …</strong></div><p id="detail">Fenster, Tabs und native Firefox-Tabgruppen.</p><p id="lastAccess">Noch kein MCP-Zugriff.</p></section>
     <p id="error" class="error" hidden></p>
     <div class="actions"><button id="toggle" type="button">MCP deaktivieren</button><button id="reconnect" class="secondary" type="button">Neu verbinden</button></div>
@@ -22,6 +33,7 @@
     <p class="note permission-note">Erlaubt Codex, installierte Erweiterungen und ihren Aktivierungsstatus abzurufen.</p>
     <p id="inventoryError" class="error" hidden></p>
     <p class="legend"><span class="key blue"></span>≤ 1 Min. <span class="key amber"></span>≤ 30 Min. <span class="key green"></span>verbunden, inaktiv <span class="key gray"></span>aus/getrennt</p>
-    <footer>Native Host: <code>de.codex.firefox_bridge</code><br>Version <span id="version">0.1.1</span></footer>
+    </main>
+    <footer>Native Host: <code>de.codex.firefox_bridge</code><br>Version <span id="version">0.1.2</span></footer>
   </body>
 </html>

@@ -9,34 +9,53 @@
   let port = null, reconnectTimer = null, retryDelay = 1000, pendingCount = 0, prompt = null;
   let queue = Promise.resolve();
   function publicState() {
-    return { ...state, settings: { ...policy.settings }, sessionExpiresAt: policy.expiresAt, icon: iconStatus({ ...state, enabled: policy.settings.enabled }) };
+    if (prompt && Date.now() >= prompt.expiresAt) finishPrompt(false, prompt);
+    return { ...state, settings: { ...policy.settings }, sessionExpiresAt: policy.expiresAt, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
   }
   function badge() {
     const status = iconStatus({ ...state, enabled: policy.settings.enabled });
-    browser.browserAction.setBadgeText({ text: "" }).catch(() => {});
+    browser.browserAction.setBadgeText({ text: prompt ? "?" : "" }).catch(() => {});
     browser.browserAction.setIcon({ path: `icon-${status.color}.svg` }).catch(() => {});
-    browser.browserAction.setTitle({ title: `Firefox ↔ Codex · ${status.label}` }).catch(() => {});
+    browser.browserAction.setTitle({ title: `Firefox ↔ Codex · ${prompt ? "Inhaltsfreigabe erforderlich · Erweiterung anklicken" : status.label}` }).catch(() => {});
   }
-  function finishPrompt(allowed) {
-    if (!prompt) return;
-    const current = prompt; prompt = null;
-    clearTimeout(current.timer); current.resolve(allowed);
-    if (current.windowId !== null) browser.windows.remove(current.windowId).catch(() => {});
+  function notifyPopup() {
+    try { browser.runtime.sendMessage({ type: "bridge_status_changed" }).catch(() => {}); }
+    catch { /* No popup receiver is required; reopening also loads the state. */ }
+  }
+  function finishPrompt(allowed, current = prompt) {
+    if (!current || prompt !== current) return false;
+    prompt = null;
+    clearTimeout(current.timer);
+    badge(); notifyPopup(); current.resolve(allowed);
+    return true;
+  }
+  function promptIsCurrent(current) {
+    if (prompt !== current) return false;
+    if (Date.now() >= current.expiresAt) { finishPrompt(false, current); return false; }
+    return true;
+  }
+  async function openApprovalPopup(current) {
+    let window;
+    try { window = await policy.getCurrentWindow(); }
+    catch { return; }
+    if (!promptIsCurrent(current) || window?.type !== "normal" || !Number.isInteger(window.id)) return;
+    try { await browser.windows.update(window.id, { focused: true, ...(window.state === "minimized" ? { state: "normal" } : {}) }); }
+    catch { /* Keep the request available through the toolbar. */ }
+    if (!promptIsCurrent(current)) return;
+    try { await browser.browserAction.openPopup({ windowId: window.id }); }
+    catch { /* Older Firefox versions may require the user's toolbar click. */ }
   }
   async function requestApproval(request) {
-    if (prompt) return false;
+    if (prompt || !policy.settings.enabled) return false;
     return new Promise(resolve => {
       const id = crypto.randomUUID();
-      const current = { id, request, resolve, windowId: null, url: `${browser.runtime.getURL("prompt.html")}?request=${id}` };
+      const current = { id, request: { ...request }, resolve, expiresAt: Date.now() + 120000 };
       prompt = current;
-      current.timer = setTimeout(() => finishPrompt(false), 120000);
-      browser.windows.create({ url: current.url, type: "popup", width: 550, height: 530 }).then(window => {
-        if (prompt === current) current.windowId = window.id;
-        else browser.windows.remove(window.id).catch(() => {});
-      }).catch(() => { if (prompt === current) finishPrompt(false); });
+      current.timer = setTimeout(() => finishPrompt(false, current), 120000);
+      badge(); notifyPopup();
+      void openApprovalPopup(current);
     });
   }
-  browser.windows.onRemoved.addListener(windowId => { if (prompt?.windowId === windowId) finishPrompt(false); });
   function scheduleReconnect() {
     if (!policy.settings.enabled || reconnectTimer) return;
     reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, retryDelay);
@@ -95,18 +114,19 @@
   }
   browser.runtime.onMessage.addListener((message, sender) => {
     if (sender.id !== browser.runtime.id || !message || typeof message !== "object") return undefined;
-    if (prompt && sender.url === prompt.url) {
-      if (message.type === "approval_details") return Promise.resolve(prompt.request);
-      if (message.type === "approval_answer" && typeof message.allowed === "boolean") { finishPrompt(message.allowed); return Promise.resolve({ ok: true }); }
-    }
     if (sender.url !== browser.runtime.getURL("popup.html")) return undefined;
+    if (message.type === "approval_answer") {
+      const current = prompt;
+      if (!current || !promptIsCurrent(current) || message.id !== current.id || typeof message.allowed !== "boolean") return Promise.resolve({ ok: false });
+      return Promise.resolve({ ok: finishPrompt(message.allowed, current) });
+    }
     if (message.type === "bridge_status") return startup.then(publicState);
     if (message.type === "bridge_reconnect") return startup.then(() => { disconnect(); retryDelay = 1000; connect(); return publicState(); });
     if (message.type === "bridge_settings" && message.settings && typeof message.settings === "object") return startup.then(async () => {
       const before = JSON.stringify(policy.settings);
       const settings = policy.setSettings(normalizeSettings(message.settings));
-      await browser.storage.local.set({ bridgeSettings: settings });
       if (JSON.stringify(settings) !== before) finishPrompt(false);
+      await browser.storage.local.set({ bridgeSettings: settings });
       if (!settings.enabled) disconnect(); else connect();
       badge(); return publicState();
     });

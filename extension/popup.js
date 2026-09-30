@@ -2,8 +2,52 @@
 "use strict";
 let settings = null, updating = false;
 let permissionsUpdating = false, permissionGranted = false, permissionRefreshId = 0;
+let pendingApproval = null, approvalSubmitting = false, statusRequestId = 0;
 const el = id => document.getElementById(id);
 const inventoryPermission = { data_collection: ["technicalAndInteraction"] };
+function renderApproval(approval) {
+  const changed = pendingApproval?.id !== approval?.id;
+  pendingApproval = approval || null;
+  el("approval").hidden = !pendingApproval;
+  el("settingsPanel").hidden = !!pendingApproval;
+  if (!pendingApproval) {
+    el("approvalAllow").disabled = true;
+    el("approvalDeny").disabled = true;
+    return;
+  }
+  el("approvalTitle").textContent = approval.title || "Ohne Titel";
+  el("approvalUrl").textContent = approval.url;
+  const scope = approval.scope === "active" ? "jeweils den aktiven Tab im zuletzt aktiven Firefox-Fenster" : "alle Tabs";
+  el("approvalDescription").textContent = approval.mode === "ask-session"
+    ? `Für ${scope} freigeben: bis zu 12 Stunden ab Freigabe, spätestens bis Firefox neu startet. Diese Frist verlängert sich nicht durch Zugriffe.`
+    : `Nur diese Anfrage für ${scope} freigeben. Bei der nächsten Inhaltsanfrage wird erneut gefragt.`;
+  const expired = !Number.isFinite(approval.expiresAt) || Date.now() >= approval.expiresAt;
+  el("approvalAllow").disabled = approvalSubmitting || expired;
+  el("approvalDeny").disabled = approvalSubmitting || expired;
+  if (changed) {
+    el("approvalError").hidden = true;
+    el("approvalDeny").focus();
+  }
+}
+async function answerApproval(allowed) {
+  if (!pendingApproval || approvalSubmitting) return;
+  if (!Number.isFinite(pendingApproval.expiresAt) || Date.now() >= pendingApproval.expiresAt) { renderApproval(pendingApproval); return; }
+  const id = pendingApproval.id;
+  approvalSubmitting = true;
+  renderApproval(pendingApproval);
+  try {
+    const result = await browser.runtime.sendMessage({ type: "approval_answer", id, allowed });
+    if (!result?.ok) throw new Error("Diese Freigabe ist abgelaufen. Bitte die Inhaltsanfrage erneut stellen.");
+  } catch (error) {
+    if (pendingApproval?.id === id) {
+      el("approvalError").hidden = false;
+      el("approvalError").textContent = String(error.message || error);
+    }
+  } finally {
+    approvalSubmitting = false;
+    await request({ type: "bridge_status" });
+  }
+}
 async function refreshPermissions() {
   if (permissionsUpdating) return;
   const requestId = ++permissionRefreshId;
@@ -40,6 +84,7 @@ async function changeInventoryPermission() {
   }
 }
 function render(state) {
+  renderApproval(state.pendingApproval);
   if (updating) return;
   settings = state.settings;
   el("status").textContent = state.icon.label;
@@ -56,24 +101,39 @@ function render(state) {
   el("version").textContent = state.version;
 }
 async function request(message) {
-  try { render(await browser.runtime.sendMessage(message)); }
-  catch (error) { el("error").hidden = false; el("error").textContent = String(error.message || error); }
+  const requestId = ++statusRequestId;
+  try {
+    const state = await browser.runtime.sendMessage(message);
+    if (requestId === statusRequestId) render(state);
+  } catch (error) {
+    if (requestId === statusRequestId) { el("error").hidden = false; el("error").textContent = String(error.message || error); }
+  }
 }
 async function save(change) {
   if (!settings || updating) return;
-  updating = true;
+  updating = true; statusRequestId += 1;
   for (const id of ["toggle", "contentMode", "contentScope"]) el(id).disabled = true;
   try {
     const state = await browser.runtime.sendMessage({ type: "bridge_settings", settings: { ...settings, ...change } });
-    updating = false; render(state);
+    statusRequestId += 1; updating = false; render(state);
   } catch (error) { el("error").hidden = false; el("error").textContent = String(error.message || error); }
-  finally { updating = false; for (const id of ["toggle", "contentMode", "contentScope"]) el(id).disabled = false; }
+  finally {
+    updating = false;
+    await request({ type: "bridge_status" });
+    for (const id of ["toggle", "contentMode", "contentScope"]) el(id).disabled = false;
+  }
 }
 el("toggle").addEventListener("click", () => save({ enabled: !settings.enabled }));
 el("contentMode").addEventListener("change", event => save({ contentMode: event.target.value }));
 el("contentScope").addEventListener("change", event => save({ contentScope: event.target.value }));
 el("reconnect").addEventListener("click", () => request({ type: "bridge_reconnect" }));
 el("inventoryPermission").addEventListener("click", changeInventoryPermission);
+el("approvalDeny").addEventListener("click", () => answerApproval(false));
+el("approvalAllow").addEventListener("click", () => answerApproval(true));
+function statusChanged(message) {
+  if (message?.type === "bridge_status_changed") request({ type: "bridge_status" });
+}
+browser.runtime.onMessage.addListener(statusChanged);
 browser.permissions.onAdded.addListener(refreshPermissions);
 browser.permissions.onRemoved.addListener(refreshPermissions);
 request({ type: "bridge_status" });
@@ -81,6 +141,7 @@ refreshPermissions();
 const refresh = setInterval(() => { request({ type: "bridge_status" }); refreshPermissions(); }, 1500);
 window.addEventListener("unload", () => {
   clearInterval(refresh);
+  browser.runtime.onMessage.removeListener(statusChanged);
   browser.permissions.onAdded.removeListener(refreshPermissions);
   browser.permissions.onRemoved.removeListener(refreshPermissions);
 });
