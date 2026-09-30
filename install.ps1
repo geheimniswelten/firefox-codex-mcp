@@ -3,13 +3,15 @@ param(
     [int]$Port = 38477,
     [switch]$GenerateOnly,
     [switch]$NoDownload,
-    [switch]$NoOpenFirefox
+    [switch]$NoOpenFirefox,
+    [switch]$NoRegisterClients
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 $originalProcessPath = $env:PATH
 $locationPushed = $false
+$clientRegistrationFailed = $false
 try {
     . (Join-Path $projectRoot 'scripts\node-runtime.ps1')
     $runtime = Resolve-FirefoxNodeRuntime -ProjectRoot $projectRoot -NoDownload:$NoDownload
@@ -29,7 +31,16 @@ try {
     if (-not $GenerateOnly) { $setupArgs += '--register-native' }
     & $runtime.NodePath @setupArgs
     if ($LASTEXITCODE -ne 0) { throw 'Native-Host-Einrichtung ist fehlgeschlagen.' }
-    Write-Host 'Danach Firefox-Erweiterung laden und .local\codex-config.toml in Codex uebernehmen. Siehe README.md.'
+    if (-not $GenerateOnly -and -not $NoRegisterClients) {
+        & $runtime.NodePath (Join-Path $projectRoot 'scripts\configure-clients.mjs') --root $projectRoot
+        if ($LASTEXITCODE -ne 0) {
+            $clientRegistrationFailed = $true
+            Write-Warning 'Native Host eingerichtet; mindestens eine KI-Client-Konfiguration konnte nicht eingerichtet werden. Details stehen oben.'
+        }
+    } else {
+        Write-Host 'KI-Client-Konfigurationen bleiben unveraendert. Manuelle Einrichtung: README.md und .local\codex-config.toml.'
+    }
+    Write-Host 'Danach Firefox-Erweiterung laden und die MCP-Verbindung der KI-Apps neu laden. Siehe README.md.'
     if (-not $GenerateOnly -and -not $NoOpenFirefox) {
         # Opening a convenience page must not turn a completed setup into a failure.
         try {
@@ -49,3 +60,4 @@ try {
     if ($locationPushed) { Pop-Location }
     $env:PATH = $originalProcessPath
 }
+if ($clientRegistrationFailed) { exit 2 }

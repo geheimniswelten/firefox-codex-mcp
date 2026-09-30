@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const excluded = new Set(['node_modules', '.runtime', '.local', 'dist', '.git', 'coverage']);
+const excluded = new Set(['node_modules', '.runtime', '.local', 'dist', '.git', 'coverage', 'work']);
 async function checkTree(directory) {
   let count = 0;
   for (const entry of await readdir(directory, { withFileTypes: true })) {

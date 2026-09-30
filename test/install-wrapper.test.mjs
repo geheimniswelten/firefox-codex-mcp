@@ -31,6 +31,7 @@ function Start-Process {
   if ($env:FIREFOX_MCP_TEST_BROWSER -eq 'error') { throw 'Fixture browser launch failed.' }
   $record = @{ executable = $FilePath; arguments = $ArgumentList; windowStyle = $WindowStyle } | ConvertTo-Json -Compress
   [IO.File]::WriteAllText((Join-Path $PSScriptRoot '..\\browser-open.json'), $record)
+  [IO.File]::AppendAllText((Join-Path $PSScriptRoot '..\\sequence.txt'), "browser\n")
 }
 `);
   // Exercise the actual PowerShell wrapper and Node executable, while replacing
@@ -44,18 +45,31 @@ function Find-FirefoxSystemNodeRuntime {
 }
 `);
   await writeFile(join(root, 'scripts', 'npm-stub.mjs'), `
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 writeFileSync(new URL('../npm-args.txt', import.meta.url), process.argv.slice(2).join(' '));
+appendFileSync(new URL('../sequence.txt', import.meta.url), 'npm\\n');
 process.exit(Number(process.env.FIREFOX_MCP_TEST_NPM_EXIT));
 `);
   await writeFile(join(root, 'scripts', 'setup.mjs'), `
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 writeFileSync(new URL('../setup-args.json', import.meta.url), JSON.stringify(process.argv.slice(2)));
+appendFileSync(new URL('../sequence.txt', import.meta.url), 'setup\\n');
+process.exit(Number(process.env.FIREFOX_MCP_TEST_SETUP_EXIT));
+`);
+  await writeFile(join(root, 'scripts', 'configure-clients.mjs'), `
+import { appendFileSync, writeFileSync } from 'node:fs';
+writeFileSync(new URL('../client-args.json', import.meta.url), JSON.stringify(process.argv.slice(2)));
+appendFileSync(new URL('../sequence.txt', import.meta.url), 'clients\\n');
+process.exit(Number(process.env.FIREFOX_MCP_TEST_CLIENT_EXIT));
 `);
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !['path', 'psmodulepath'].includes(key.toLowerCase())));
   env.PATH = [root, dirname(process.execPath), process.env.PATH ?? process.env.Path].join(delimiter);
   env.FIREFOX_MCP_TEST_NPM_EXIT = '0';
+  env.FIREFOX_MCP_TEST_SETUP_EXIT = '0';
+  env.FIREFOX_MCP_TEST_CLIENT_EXIT = '0';
   env.FIREFOX_MCP_TEST_NODE = process.execPath;
+  env.TEMP = root;
+  env.TMP = root;
   const run = (args = [], overrides = {}) => spawnSync(
     join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'install.ps1'), '-NoDownload', ...args],
@@ -70,6 +84,8 @@ test('Windows PowerShell 5.1 installer accepts Node and forwards registration fr
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal((await readFile(join(root, 'npm-args.txt'), 'utf8')).trim(), 'ci --omit=dev');
   assert.deepEqual(JSON.parse(await readFile(join(root, 'setup-args.json'), 'utf8')), ['--register-native']);
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'client-args.json'), 'utf8')), ['--root', await realpath(root)]);
+  assert.equal(await readFile(join(root, 'sequence.txt'), 'utf8'), 'npm\nsetup\nclients\nbrowser\n');
   assert.deepEqual(JSON.parse(await readFile(join(root, 'browser-open.json'), 'utf8')), {
     executable: 'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
     arguments: ['-new-tab', 'about:debugging#/runtime/this-firefox'],
@@ -83,6 +99,8 @@ test('GenerateOnly forwards explicit port and does not request registration', wi
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.deepEqual(JSON.parse(await readFile(join(root, 'setup-args.json'), 'utf8')), ['--port', '42347']);
   await assert.rejects(readFile(join(root, 'browser-open.json')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(root, 'client-args.json')), { code: 'ENOENT' });
+  assert.equal(await readFile(join(root, 'sequence.txt'), 'utf8'), 'npm\nsetup\n');
 });
 
 test('installer aborts before setup if dependency installation fails', windowsOnly, async t => {
@@ -91,7 +109,37 @@ test('installer aborts before setup if dependency installation fails', windowsOn
   assert.notEqual(result.status, 0);
   assert.match(result.stdout + result.stderr, /npm ci ist fehlgeschlagen/u);
   await assert.rejects(readFile(join(root, 'setup-args.json')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(root, 'client-args.json')), { code: 'ENOENT' });
   await assert.rejects(readFile(join(root, 'browser-open.json')), { code: 'ENOENT' });
+  assert.equal(await readFile(join(root, 'sequence.txt'), 'utf8'), 'npm\n');
+});
+
+test('native setup failure stops before client registration and Firefox launch', windowsOnly, async t => {
+  const { root, run } = await fixture(t);
+  const result = run([], { FIREFOX_MCP_TEST_SETUP_EXIT: '23' });
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stdout + result.stderr, /Native-Host-Einrichtung ist fehlgeschlagen/u);
+  await assert.rejects(readFile(join(root, 'client-args.json')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(root, 'browser-open.json')), { code: 'ENOENT' });
+  assert.equal(await readFile(join(root, 'sequence.txt'), 'utf8'), 'npm\nsetup\n');
+});
+
+test('NoRegisterClients skips client changes but still registers native host and opens Firefox', windowsOnly, async t => {
+  const { root, run } = await fixture(t);
+  const result = run(['-NoRegisterClients']);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'setup-args.json'), 'utf8')), ['--register-native']);
+  await assert.rejects(readFile(join(root, 'client-args.json')), { code: 'ENOENT' });
+  assert.equal(await readFile(join(root, 'sequence.txt'), 'utf8'), 'npm\nsetup\nbrowser\n');
+});
+
+test('client registration failure still opens Firefox then reports partial failure', windowsOnly, async t => {
+  const { root, run } = await fixture(t);
+  const result = run([], { FIREFOX_MCP_TEST_CLIENT_EXIT: '19' });
+  assert.equal(result.status, 2, result.stderr || result.stdout);
+  assert.match(result.stdout + result.stderr, /mindestens eine KI-Client-Konfiguration/u);
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'client-args.json'), 'utf8')), ['--root', await realpath(root)]);
+  assert.equal(await readFile(join(root, 'sequence.txt'), 'utf8'), 'npm\nsetup\nclients\nbrowser\n');
 });
 
 test('NoOpenFirefox completes installation without launching the browser', windowsOnly, async t => {
@@ -99,6 +147,8 @@ test('NoOpenFirefox completes installation without launching the browser', windo
   const result = run(['-NoOpenFirefox']);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.deepEqual(JSON.parse(await readFile(join(root, 'setup-args.json'), 'utf8')), ['--register-native']);
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'client-args.json'), 'utf8')), ['--root', await realpath(root)]);
+  assert.equal(await readFile(join(root, 'sequence.txt'), 'utf8'), 'npm\nsetup\nclients\n');
   await assert.rejects(readFile(join(root, 'browser-open.json')), { code: 'ENOENT' });
 });
 

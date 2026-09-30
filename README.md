@@ -6,7 +6,7 @@ Firefox-Erweiterung und lokaler MCP-Server für die vorhandenen Firefox-Fenster,
 
 - Desktop-Firefox **140 oder neuer** für native Tabgruppen und die aktuelle Firefox-Datenfreigabe bei der Installation.
 - **Node.js 22 oder neuer** einschließlich npm. Der Windows-Installer verwendet eine passende vorhandene Installation oder richtet automatisch Node 24 LTS samt npm unter `.runtime/node` im Projekt ein. Eine vorherige systemweite Node-Installation ist damit nicht erforderlich.
-- Codex mit Unterstützung für lokale MCP-Server.
+- Ein KI-Client mit Unterstützung für lokale MCP-Server, beispielsweise Codex oder Claude Code.
 - Windows: PowerShell; Einrichtung erfolgt im eigenen Benutzerkonto ohne Administratorrechte.
 
 Die Dateien sind Quellcode und eine unsignierte Entwicklungs-Erweiterung. Sie sind durch das Erstellen dieses Projekts noch nicht in Firefox oder Codex installiert.
@@ -24,19 +24,50 @@ Die Dateien sind Quellcode und eine unsignierte Entwicklungs-Erweiterung. Sie si
 
    Fehlen Node oder npm, lädt das Skript das passende Windows-ZIP von [nodejs.org](https://nodejs.org/en/download), prüft dessen SHA256-Prüfsumme und entpackt es im Projekt. Es ändert weder den systemweiten Windows-Pfad noch eine vorhandene Node-Installation. Internetzugriff ist für den ersten Download und die Paketinstallation nötig. `install.ps1 -NoDownload` unterbindet den automatischen Node-Download; dann muss bereits ein geeignetes Node samt npm vorhanden sein. Eine einmal eingerichtete Projekt-Runtime wird wiederverwendet.
 
-   Bei der Installation führt das Skript `npm ci --omit=dev` aus, erzeugt private Konfigurationsdateien in `.local` und registriert den Native Host unter `HKCU\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge`. Eine bestehende Registrierung auf einen anderen Pfad wird nicht überschrieben. Codex wird dabei nicht umkonfiguriert. Das CMD-Menü setzt die PowerShell-Ausführungsrichtlinie nur für seinen jeweiligen Skriptprozess; eine systemweite Richtlinie wird nicht verändert. Die entsprechenden Einzelschritte sind:
+   Bei der Installation führt das Skript `npm ci --omit=dev` aus, erzeugt private Konfigurationsdateien in `.local` und registriert den Native Host unter `HKCU\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge`. Eine bestehende Registrierung auf einen anderen Pfad wird nicht überschrieben. Anschließend ergänzt der Installer den lokalen MCP-Server `firefox` in erkannten KI-Client-Konfigurationen (Details unten). Das CMD-Menü setzt die PowerShell-Ausführungsrichtlinie nur für seinen jeweiligen Skriptprozess; eine systemweite Richtlinie wird nicht verändert. Die entsprechenden Einzelschritte sind:
 
    ```powershell
    npm ci --omit=dev
    node scripts/setup.mjs --register-native
+   node scripts/configure-clients.mjs
    ```
 
    Nur Dateien erzeugen, ohne Registrierung: `npm run setup` oder `.\install.ps1 -GenerateOnly`. Einen anderen Port wählen: `node scripts/setup.mjs --port 38478 --register-native`. Ein erneuter Setup-Aufruf behält ein vorhandenes Token; ohne `--port` bleibt auch der bestehende Port erhalten.
 3. Nach erfolgreicher Installation öffnet das Skript automatisch Firefox mit `about:debugging#/runtime/this-firefox`. Dort **Temporäres Add-on laden** wählen und `extension/manifest.json` auswählen; den vollständigen Dateipfad zeigt der Installer an. Wird Firefox nicht gefunden oder kann es nicht geöffnet werden, bleibt die Installation erfolgreich und die Adresse wird zum manuellen Öffnen angezeigt. Bei „Nur Erzeugen“ öffnet sich kein Browser. Für unbeaufsichtigte Installationen verhindert `install.ps1 -NoOpenFirefox` das automatische Öffnen. Im Erweiterungsmenü kann die Erweiterung an die Symbolleiste angeheftet werden.
-4. Den generierten Abschnitt aus `.local/codex-config.toml` in die vorhandene Codex-MCP-Konfiguration übernehmen, üblicherweise `%USERPROFILE%\.codex\config.toml` bzw. `$CODEX_HOME\config.toml`, wenn `CODEX_HOME` gesetzt ist. Einen bestehenden Abschnitt `[mcp_servers.firefox]` vorher prüfen; die vorhandene Konfiguration nicht durch die Beispieldatei ersetzen. Der Abschnitt enthält absolute Node-/Serverpfade und `tool_timeout_sec = 180` für Inhaltsfreigaben.
-5. Codex-MCP-Verbindung neu laden bzw. Codex neu starten. Zunächst `firefox_status`, danach `firefox_get_current` aufrufen.
+4. Die Ergebnisliste des Installers prüfen: Pro KI-Client erscheinen Erkennung, Einrichtung, Konflikt oder Fehler sowie gegebenenfalls der Pfad zur Sicherung. `-NoRegisterClients` lässt die KI-Client-Konfigurationen unverändert. Bei „Nur Erzeugen“ werden weder KI-Clients noch Firefox registriert. Als manuelle Codex-Vorlage bleibt `.local/codex-config.toml` verfügbar; niemals damit die vollständige vorhandene Konfiguration ersetzen.
+5. Die MCP-Verbindung betroffener KI-Apps neu laden oder die Apps neu starten. Claude Code in VS Code benötigt eine neue Konversation; Gemini Code Assist gegebenenfalls **Developer: Reload Window**. Zunächst `firefox_status`, danach `firefox_get_current` aufrufen.
 
 Temporäre Firefox-Add-ons verschwinden beim Firefox-Neustart und müssen dann erneut geladen werden. Für dauerhafte Installation in regulärem Firefox muss die Erweiterung über Mozilla signiert werden, beispielsweise als nicht öffentlich gelistetes Add-on. Das mit `npm run package` erzeugte ZIP ist noch nicht signiert. Siehe [temporäre Installation](https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/) und [Signieren und Verteilen](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
+
+## Automatische Einrichtung der KI-Clients
+
+„Erzeugen + Installieren“ prüft vorhandene Konfigurationsordner im Benutzerkonto. Ein verbliebener Ordner kann auch von einer früheren Installation stammen; die Erkennung ist kein Beweis, dass das Programm noch installiert ist. Fehlt der jeweilige Ordner, wird kein neues App-Profil angelegt. `%USERPROFILE%\.agents\skills` und `.claude\skills` enthalten Arbeitsanweisungen und sind keine Orte für MCP-Servereinträge. Für diese Brücke ist kein zusätzlicher Skill nötig.
+
+| KI-Client | Standarddatei unter Windows | MCP-Abschnitt |
+| --- | --- | --- |
+| Codex App, CLI und IDE-Erweiterung | `%USERPROFILE%\.codex\config.toml` | `mcp_servers.firefox` |
+| Claude Desktop (Chat) | `%APPDATA%\Claude\claude_desktop_config.json` | `mcpServers.firefox` |
+| Claude Code, auch in VS Code | `%USERPROFILE%\.claude.json` | `mcpServers.firefox` |
+| LM Studio | `%USERPROFILE%\.lmstudio\mcp.json` | `mcpServers.firefox` |
+| Hermes Desktop / Agent von Nous | `%LOCALAPPDATA%\hermes\config.yaml` | `mcp_servers.firefox` |
+| Gemini CLI / Code Assist | `%USERPROFILE%\.gemini\settings.json` | `mcpServers.firefox` |
+| Eigent | `%USERPROFILE%\.eigent\mcp.json` | `mcpServers.firefox` |
+| OpenClaw | `%USERPROFILE%\.openclaw\openclaw.json` | `mcp.servers.firefox` |
+
+Unterstützte Pfadüberschreibungen: `CODEX_HOME`, `CLAUDE_CONFIG_DIR` (enthält dann `.claude.json`), `HERMES_HOME`, `OPENCLAW_CONFIG_PATH` und `OPENCLAW_STATE_DIR`. `GEMINI_CLI_HOME` bezeichnet den **Elternordner** von `.gemini`; die IDE kann weiterhin ihren Standardordner verwenden. Mehrdeutige OpenClaw-Profil-/Home-Overrides werden mit Hinweis übersprungen; dafür den konkreten Konfigurationspfad angeben. OpenClaw im Read-only-/Nix-Modus wird nicht verändert. Bei Hermes wird ein vorhandener älterer `.hermes`-Ordner berücksichtigt; mehrere mögliche Profile benötigen einen eindeutigen `HERMES_HOME`.
+
+Die normale **Gemini-Desktop-App** auf gemini.google hat keine hier belegte benutzerdefinierte lokale MCP-Konfiguration. Der Installer zeigt dafür einen Hinweis; die Unterstützung der CLI/Code-Assist-Variante ist davon unabhängig.
+
+Jeder Eintrag startet Node mit absoluten Pfaden zum MCP-Server und seiner privaten Konfiguration. Das Zugriffstoken wird nicht in Client-Konfigurationen kopiert. Vor Änderungen vorhandener Dateien wird eine eigene Sicherung angelegt. Unverwandte Einstellungen bleiben erhalten; vorhandene fremde oder geänderte `firefox`-Einträge werden als Konflikt gemeldet. Wiederholtes Installieren erzeugt keine doppelten Einträge. Kommentare und fremde Abschnitte werden durch gezielte Textänderungen erhalten; nicht sicher bearbeitbare komplexe Konfigurationen werden mit Hinweis übersprungen. Eine App kann zusätzlich eigene Freigaben oder Unternehmensrichtlinien verlangen; diese werden nicht umgangen.
+
+Bei einem Client-Fehler bleibt der erfolgreich eingerichtete Native Host bestehen. Das Installationsmenü meldet den Teilfehler mit Rückgabecode `2`. Die Client-Einrichtung lässt sich getrennt wiederholen oder zunächst anzeigen:
+
+```powershell
+.\.runtime\node\node.exe scripts/configure-clients.mjs --dry-run
+.\.runtime\node\node.exe scripts/configure-clients.mjs
+```
+
+Dokumentation der Konfigurationsformate: [Codex](https://learn.chatgpt.com/docs/extend/mcp), [Claude Desktop](https://modelcontextprotocol.io/docs/develop/connect-local-servers), [Claude Code](https://code.claude.com/docs/en/mcp), [LM Studio](https://lmstudio.ai/docs/app/mcp), [Hermes](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference), [Hermes unter Windows](https://hermes-agent.nousresearch.com/docs/user-guide/windows-native/), [Gemini CLI](https://geminicli.com/docs/tools/mcp-server/), [Gemini Code Assist](https://docs.cloud.google.com/gemini/docs/codeassist/use-agentic-chat-pair-programmer), [Eigent](https://www.eigent.ai/blog/eigent-how-to-setting-up-your-first-custom-mcp-server), [OpenClaw](https://docs.openclaw.ai/gateway/config-extensions).
 
 ## Symbolleiste und Zugriffsregeln
 
@@ -124,10 +155,12 @@ Unter Linux/macOS erzeugt `npm run setup` eine ausführbare Shell-Startdatei. Da
 
 ## Deinstallation
 
-In `install.cmd` die **3** wählen oder `uninstall.ps1` ausführen. Das funktioniert auch aus einer neu heruntergeladenen Kopie, etwa im Downloadordner, wenn der ursprüngliche Projektordner bereits gelöscht wurde. Eine erneute Installation ist dafür nicht erforderlich; die Deinstallation benötigt weder Node noch npm.
+In `install.cmd` die **3** wählen oder `uninstall.ps1` ausführen. Das funktioniert auch aus einer neu heruntergeladenen Kopie, etwa im Downloadordner, wenn der ursprüngliche Projektordner bereits gelöscht wurde. Eine erneute Installation ist dafür nicht erforderlich; das Entfernen der Native-Host-Registrierung und der zugehörigen lokalen Dateien benötigt weder Node noch npm.
 
 Das Skript ermittelt die frühere Installation aus der benutzerspezifischen Native-Messaging-Registrierung `de.codex.firefox_bridge`. Es entfernt diesen Eintrag auch bei fehlendem ursprünglichem Ordner. Ist der registrierte Pfad erkennbar, beendet es eindeutig dieser Installation zugeordnete Brücken-/MCP-Prozesse und entfernt deren bekannte erzeugte Dateien in `.local`, soweit noch vorhanden. Der Speicherort der neuen Downloadkopie muss damit nicht übereinstimmen.
 
 Ohne Registrierung werden nur die erzeugten Dateien der aufgerufenen Projektkopie bereinigt, etwa nach „Nur Erzeugen“. Bei einem nicht erkennbaren registrierten Pfad wird ausschließlich der Anwendungseintrag entfernt. Quellcode, Abhängigkeiten einschließlich `.runtime/node`, unbekannte Dateien und die Registrierungen anderer Anwendungen bleiben erhalten. Wiederholtes Deinstallieren ist möglich. `uninstall.ps1 -WhatIf` zeigt die vorgesehenen Schritte ohne Änderungen an.
 
-Das Firefox-Add-on unter `about:addons` und den manuell angelegten `[mcp_servers.firefox]`-Eintrag in Codex separat entfernen. Diese beiden Einträge wurden auch vom Installer nicht automatisch angelegt. Anschließend kann der Projektordner bei Bedarf entfernt werden.
+Wenn eine passende Node-Runtime und die Parserpakete in der aktuellen oder ursprünglichen Projektkopie verfügbar sind, entfernt das Skript zusätzlich eindeutig zu dieser Installation gehörende, unveränderte Firefox-MCP-Einträge der erkannten KI-Clients. Fremde und nachträglich geänderte Einträge bleiben erhalten. Fehlen Runtime oder Pakete nach dem Löschen des ursprünglichen Ordners, wird die Native-Host-Deinstallation trotzdem abgeschlossen; der Installer weist auf manuell zu entfernende Client-Einträge hin. Dafür wird nichts heruntergeladen. `-WhatIf` verändert auch die Client-Konfigurationen nicht.
+
+Das Firefox-Add-on unter `about:addons` separat entfernen. Eventuell übersprungene Client-Einträge anhand der obigen Tabelle prüfen und die betroffenen KI-Apps neu starten. Sicherungskopien werden nicht automatisch zurückgespielt, da dies spätere Änderungen anderer Einstellungen verlieren könnte. Anschließend kann der Projektordner bei Bedarf entfernt werden.

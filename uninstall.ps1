@@ -167,6 +167,51 @@ function Stop-FirefoxBridgeProcess {
     } finally { $process.Dispose() }
 }
 
+function Remove-FirefoxBridgeClientRegistrations {
+    param([Parameter(Mandatory = $true)][string]$ProjectPath, [switch]$Preview)
+    # A fresh download must still uninstall the native host without Node/npm.
+    # Prefer its current registrar; use the installed copy only if needed.
+    $scriptPath = $null
+    foreach ($sourceRoot in @($PSScriptRoot, $ProjectPath)) {
+        $candidate = [IO.Path]::Combine($sourceRoot, 'scripts\configure-clients.mjs')
+        if ((Test-Path -LiteralPath $candidate -PathType Leaf) -and
+            (Test-Path -LiteralPath ([IO.Path]::Combine($sourceRoot, 'node_modules\acorn\package.json')) -PathType Leaf) -and
+            (Test-Path -LiteralPath ([IO.Path]::Combine($sourceRoot, 'node_modules\js-yaml\package.json')) -PathType Leaf)) {
+            $scriptPath = $candidate
+            break
+        }
+    }
+    $nodePath = $null
+    $nodeCandidates = @(
+        [IO.Path]::Combine($PSScriptRoot, '.runtime\node\node.exe'),
+        [IO.Path]::Combine($ProjectPath, '.runtime\node\node.exe')
+    )
+    $command = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue
+    if ($command) { $nodeCandidates += $command.Source }
+    foreach ($candidate in $nodeCandidates) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+        try {
+            $version = & $candidate --version 2>$null
+            if ($LASTEXITCODE -eq 0 -and $version -match '^v(\d+)\.' -and [int]$Matches[1] -ge 22) {
+                $nodePath = $candidate
+                break
+            }
+        } catch { }
+    }
+    if (-not $nodePath -or -not $scriptPath) {
+        Write-Warning 'KI-Client-Eintraege bleiben erhalten: Node 22+ oder die Parserpakete fehlen. Native-Host-Deinstallation wird fortgesetzt. Zugehoerigen Firefox-MCP-Eintrag in den KI-Apps manuell entfernen (siehe README.md).'
+        return
+    }
+    $arguments = @($scriptPath, '--remove', '--root', $ProjectPath)
+    if ($Preview) { $arguments += '--dry-run' }
+    try {
+        & $nodePath @arguments
+        if ($LASTEXITCODE -ne 0) { Write-Warning 'Mindestens ein KI-Client-Eintrag bleibt erhalten; Details stehen oben. Native-Host-Deinstallation wird fortgesetzt.' }
+    } catch {
+        Write-Warning 'KI-Client-Eintraege konnten nicht bereinigt werden. Native-Host-Deinstallation wird fortgesetzt; passende Eintraege manuell entfernen.'
+    }
+}
+
 function Invoke-FirefoxBridgeUninstall {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param()
@@ -203,6 +248,15 @@ function Invoke-FirefoxBridgeUninstall {
         if ($PSCmdlet.ShouldProcess("Bridge-Prozess PID $($snapshot.ProcessId)", 'Nur diesen Projektprozess beenden')) { Stop-FirefoxBridgeProcess $snapshot }
     }
     if ($paths) {
+        try {
+            if ($WhatIfPreference) {
+                Remove-FirefoxBridgeClientRegistrations -ProjectPath $paths.Project -Preview
+            } elseif ($PSCmdlet.ShouldProcess($paths.Project, 'Zugehoerige Firefox-MCP-Eintraege aus erkannten KI-Clients entfernen')) {
+                Remove-FirefoxBridgeClientRegistrations -ProjectPath $paths.Project
+            }
+        } catch {
+            Write-Warning 'Die optionale KI-Client-Bereinigung ist nicht verfuegbar. Native-Host-Deinstallation wird fortgesetzt; passende Eintraege manuell pruefen.'
+        }
         foreach ($file in $paths.Files) {
             # Revalidate links immediately before each deletion; never recurse.
             $null = Get-FirefoxBridgeLocalFiles -ProjectPath $paths.Project
@@ -221,8 +275,8 @@ function Invoke-FirefoxBridgeUninstall {
     if ($WhatIfPreference) { Write-Host 'Vorschau beendet; es wurden keine Aenderungen vorgenommen.' }
     else { Write-Host 'Die Registrierung dieser Anwendung und ihre zuordenbaren lokalen Bridge-Dateien wurden entfernt, soweit vorhanden.' }
     Write-Host 'Firefox-Erweiterung bei Bedarf unter about:addons manuell entfernen.'
-    Write-Host 'Den passenden Firefox-MCP-Eintrag in Codex manuell entfernen und die Verbindung beenden. Andere Eintraege bleiben unveraendert.'
-    Write-Host 'Firefox und Codex anschliessend neu starten; nicht sicher zugeordnete Prozesse werden niemals beendet.'
+    Write-Host 'Uebersprungene oder nachtraeglich geaenderte Firefox-MCP-Eintraege gegebenenfalls manuell entfernen; andere Server bleiben unveraendert.'
+    Write-Host 'Firefox und betroffene KI-Apps anschliessend neu starten; nicht sicher zugeordnete Prozesse werden niemals beendet.'
 }
 
 # Dot-sourcing exposes the small boundaries for isolated tests, but performs no work.

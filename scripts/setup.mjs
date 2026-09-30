@@ -180,7 +180,7 @@ async function main() {
     } else throw new Error(`Unbekannte Option: ${arg}`);
   }
   const result = await prepareSetup(options);
-  console.log(`Lokale Konfiguration: ${result.configPath}\nCodex-Konfigurationsabschnitt: ${result.codexPath}\nNative-Host-Manifest: ${result.manifestPath}\nPort: ${result.port}\nNative Host registriert: ${result.registered ? 'ja' : 'nein'}\nFirefox-Erweiterung danach laden bzw. neu laden. Codex-MCP-Konfiguration separat übernehmen.`);
+  console.log(`Lokale Konfiguration: ${result.configPath}\nCodex-Konfigurationsvorlage: ${result.codexPath}\nNative-Host-Manifest: ${result.manifestPath}\nPort: ${result.port}\nNative Host registriert: ${result.registered ? 'ja' : 'nein'}\nFirefox-Erweiterung danach laden bzw. neu laden. KI-Clients: scripts/configure-clients.mjs (wird von install.ps1 automatisch ausgefuehrt).`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

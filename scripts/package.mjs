@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
-const excluded = new Set(['node_modules', '.runtime', '.local', 'dist', '.git', 'coverage']);
+const excluded = new Set(['node_modules', '.runtime', '.local', 'dist', '.git', 'coverage', 'work']);
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
   return value >>> 0;
