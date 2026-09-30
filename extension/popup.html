@@ -26,9 +26,11 @@
     <label for="contentMode">Seiteninhalte auslesen</label>
     <select id="contentMode"><option value="deny">Nicht erlauben</option><option value="allow">Erlauben</option><option value="ask-every-time">Jedes Mal fragen</option><option value="ask-session">Für eine Sitzung fragen (12 Stunden)</option></select>
     <label for="contentScope">Geltungsbereich für Seiteninhalte</label>
-    <select id="contentScope"><option value="active">Nur aktiver Tab im zuletzt aktiven Fenster</option><option value="all">Alle Tabs</option></select>
+    <select id="contentScope"><option value="active">Aktiver Tab; andere Tabs einzeln auf Anfrage</option><option value="all">Alle Tabs</option></select>
     <p id="session" class="note"></p>
-    <p class="note">Standard: Sitzungsfreigabe, nur aktiver Tab. Eine Freigabe endet nach 12 Stunden oder beim Firefox-Neustart. Änderungen widerrufen sie. Entladene Tabs werden beim Lesen nicht aufgeweckt.</p>
+    <p class="note">Andere Tabs werden einzeln mit ihrer URL angefragt. Sitzungsfreigaben enden nach 12 Stunden, beim Firefox-Neustart oder nach einer Einstellungsänderung. Entladene Tabs bleiben entladen.</p>
+    <div class="actions"><button id="resetApprovals" type="button" class="secondary">Temporäre Freigaben zurücksetzen</button></div>
+    <p class="note">Widerruft sofort alle Sitzungs- und Tabfreigaben und lehnt eine offene Anfrage ab. Die Inhaltsregeln bleiben erhalten.</p>
     <label class="permission-option" for="inventoryPermission"><input id="inventoryPermission" type="checkbox" disabled><span>Erweiterungsliste und Browser-Version freigeben</span></label>
     <p class="note permission-note">Erlaubt Codex, installierte Erweiterungen und ihren Aktivierungsstatus abzurufen.</p>
     <p id="inventoryError" class="error" hidden></p>

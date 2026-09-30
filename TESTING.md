@@ -1,5 +1,21 @@
 # Prüfstand vom 30. September 2026
 
+## Menüpunkt zum erneuten Laden des Add-ons
+
+`install.cmd` bietet jetzt **3: Add-on im Firefox neu laden** und **4: Deinstallieren**. Der zugehörige Aufruf `install.ps1 -OpenFirefoxOnly` öffnet die Debugging-Seite und zeigt den Manifestpfad sowie den Hinweis auf **Neu laden** an. Er erfolgt vor der Node-Erkennung und führt weder npm noch Native-Host- oder KI-Client-Einrichtung aus.
+
+Die **14 gezielten CMD-/Installer-Tests** bestanden mit echtem `cmd.exe` und Windows PowerShell **5.1**. Geprüft wurden die neue Menüzuordnung, Fehlercodeweitergabe und die weiterhin ausdrückliche Eingabe von **0** zum Schließen. Der Direktaufruf funktioniert auch mit ungültigem Node-Pfad und absichtlich fehlschlagenden Installationshelfern; diese werden nicht aufgerufen. Fehlendes Firefox und Startfehler liefern für diesen eigenständigen Menüpunkt Fehlercode `1` samt manueller Adresse und Manifestpfad. Browsererkennung und Prozessstart wurden ersetzt; es wurde kein echtes Firefox-Fenster geöffnet. Die folgenden Abschnitte dokumentieren die vorherigen Prüfstände.
+
+## Einzelne Tabfreigaben und sofortiger Widerruf
+
+In `C:\DevApps.git\Firefox MCP-Server` öffnen Inhaltsanfragen für andere geladene Tabs jetzt direkt die vorhandene Toolbar-Freigabe. Im Sitzungsmodus gelten diese Freigaben für genau einen Tab und seine URL mit eigener fester Zwölfstundenfrist. Aktive Sitzungsfreigaben bleiben davon getrennt. Bei „Erlauben“ und „Jedes Mal fragen“ wird ein anderer Tab für jede Anfrage einzeln freigegeben; „Nicht erlauben“ und deaktiviertes MCP bleiben Sperren.
+
+Der neue Knopf **„Temporäre Freigaben zurücksetzen“** widerruft sämtliche Sitzungs- und Tabfreigaben sofort und lehnt offene Freigabeanfragen ab. Laufende Leseanfragen prüfen den Widerruf vor der Inhaltsausgabe erneut. Tests decken außerdem Navigation weg und zurück, Tabwechsel, Entladen und Schließen, getrennte Tab-IDs bei gleicher URL, feste Ablaufzeiten sowie einen Reset unmittelbar nach einer asynchronen Berechtigungsprüfung ab.
+
+Der abschließende vollständige Lauf mit Node **22.23.2** bestand mit **156 erfolgreichen Tests, 0 Fehlern und 1 übersprungenen Test** (157 insgesamt). Übersprungen wurde ausschließlich der Test für ausdrücklich blockierte Windows-ACL-Operationen, weil diese Operationen in dieser Umgebung verfügbar sind. `TEMP` und `TMP` wurden nur für die Testprozesse auf ein Arbeitsverzeichnis gesetzt; die Installer-/Deinstallationstests arbeiten weiterhin mit isolierten Testverzeichnissen und ersetzten Registrierungsgrenzen.
+
+`node scripts/check.mjs` prüfte die Syntax aller **29 JavaScript-Dateien** und das Manifest erfolgreich; `git diff --check` meldete keine Fehler. Mozilla `web-ext lint` konnte in dieser Projektinstallation nicht ausgeführt werden, weil die Entwicklungsabhängigkeit `web-ext` fehlt. Es wurden keine Abhängigkeiten nachinstalliert. Die laufende Benutzer-Erweiterung wurde weder neu geladen noch mit den Änderungen live getestet; zum Aktivieren ist das Add-on neu zu laden. Die folgenden Abschnitte dokumentieren frühere Prüfstände.
+
 ## Toolbar-Freigabe in Version 0.1.2
 
 Die Inhaltsfreigabe verwendet jetzt das vorhandene Add-on-Popup. Neue Tests prüfen das Aktivieren des zuletzt aktiven normalen Fensters, Wiederherstellen minimierter Fenster, den Verzicht auf Tabwechsel und zusätzliche Fenster sowie die manuelle Antwort bei fehlgeschlagenem automatischem Öffnen. Der produktive Berechtigungsprüfer wird dabei mit kontrollierten Browser-API-Antworten verwendet.

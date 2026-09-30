@@ -4,11 +4,24 @@ param(
     [switch]$GenerateOnly,
     [switch]$NoDownload,
     [switch]$NoOpenFirefox,
-    [switch]$NoRegisterClients
+    [switch]$NoRegisterClients,
+    [switch]$OpenFirefoxOnly
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
+if ($OpenFirefoxOnly) {
+    try {
+        . (Join-Path $projectRoot 'scripts\open-firefox-setup.ps1')
+        if (-not (Open-FirefoxSetupPage -ProjectRoot $projectRoot)) { exit 1 }
+        exit 0
+    } catch {
+        Write-Host ('Firefox konnte nicht geoeffnet werden: ' + $_.Exception.Message) -ForegroundColor Red
+        Write-Host 'Bitte in Firefox manuell oeffnen: about:debugging#/runtime/this-firefox'
+        Write-Host ('Dort unter "Temporaeres Add-on laden" auswaehlen: ' + [IO.Path]::Combine($projectRoot, 'extension\manifest.json'))
+        exit 1
+    }
+}
 $originalProcessPath = $env:PATH
 $locationPushed = $false
 $clientRegistrationFailed = $false

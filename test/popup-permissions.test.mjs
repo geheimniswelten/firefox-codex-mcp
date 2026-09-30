@@ -43,6 +43,7 @@ function mount({ granted = false, rejection = null, accepted = true, pendingAppr
         }
         if (message.type === 'bridge_status' && statusResponses.length) return structuredClone(await statusResponses.shift());
         if (message.type === 'bridge_settings') state.settings = structuredClone(message.settings);
+        if (message.type === 'bridge_reset_approvals') { state.sessionExpiresAt = null; state.pendingApproval = null; }
         return structuredClone(state);
       }
     },
@@ -152,6 +153,41 @@ test('toolbar approval renders page-controlled title and URL as text and describ
   popup.setPending(approval({ id: 'approval-c', scope: 'all', mode: 'ask-every-time' })); popup.statusChanged(); await settle();
   assert.match(popup.el('approvalDescription').textContent, /Nur diese Anfrage.*alle Tabs.*erneut gefragt/u);
   assert.doesNotMatch(popup.el('approvalDescription').textContent, /12 Stunden/u);
+});
+
+test('individual tab approval names its exact URL scope and fixed session or one-read duration', async () => {
+  const pending = approval({ scope: 'tab', title: '<script>page title</script>', url: 'https://other.test/private?exact=1' });
+  const popup = mount({ pendingApproval: pending }); await settle();
+  assert.equal(popup.el('approvalTitle').textContent, pending.title);
+  assert.equal(popup.el('approvalUrl').textContent, pending.url);
+  assert.match(popup.el('approvalDescription').textContent, /diesen Tab.*genau.*URL.*12 Stunden.*verlängert sich nicht/u);
+  assert.match(popup.el('approvalDescription').textContent, /Andere Tabs und andere URLs benötigen eine eigene Freigabe/u);
+  assert.doesNotMatch(popup.el('approvalDescription').textContent, /alle Tabs|aktiven Tab/u);
+  popup.setPending(approval({ id: 'one-read', scope: 'tab', mode: 'ask-every-time' })); popup.statusChanged(); await settle();
+  assert.match(popup.el('approvalDescription').textContent, /Nur diese Anfrage.*diesen Tab.*genau.*URL.*erneut gefragt/u);
+  assert.doesNotMatch(popup.el('approvalDescription').textContent, /12 Stunden/u);
+});
+
+test('reset button sends temporary-approval reset and immediately displays returned state', async () => {
+  const popup = mount(); await settle();
+  popup.state.sessionExpiresAt = Date.now() + 12 * 60 * 60 * 1000;
+  popup.refresh(); await settle();
+  assert.match(popup.el('session').textContent, /Sitzungsfreigabe bis/u);
+  const settingsBefore = structuredClone(popup.state.settings);
+  await popup.el('resetApprovals').listeners.get('click')();
+  assert.deepEqual(popup.messages.filter(message => message.type === 'bridge_reset_approvals'), [{ type: 'bridge_reset_approvals' }]);
+  assert.equal(popup.el('session').textContent, 'Noch keine aktive Sitzungsfreigabe.');
+  assert.deepEqual(popup.state.settings, settingsBefore);
+  assert.equal(popup.el('resetApprovals').disabled, false);
+});
+
+test('an older status reply cannot restore a grant after a reset', async () => {
+  const popup = mount(); await settle();
+  const stale = deferred(), oldState = { ...popup.state, sessionExpiresAt: Date.now() + 12 * 60 * 60 * 1000 };
+  popup.queueStatus(stale.promise); popup.refresh();
+  await popup.el('resetApprovals').listeners.get('click')();
+  stale.resolve(oldState); await settle();
+  assert.equal(popup.el('session').textContent, 'Noch keine aktive Sitzungsfreigabe.');
 });
 
 test('answering sends the exact request ID once while awaiting the background and refreshes status', async () => {

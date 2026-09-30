@@ -216,11 +216,11 @@ test('packet cap uses explicit truncation and correct nextOffset without losing 
   assert.ok(Buffer.byteLength(JSON.stringify(batched)) < 800000);
 });
 
-test('content defaults active-only and asks once per fixed twelve-hour session, never sliding', async () => {
+test('content defaults to active scope and asks once per fixed twelve-hour session, never sliding', async () => {
   let now = 100000, prompts = 0;
   const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
   const policy = new ContentAccess(browser, { now: () => now, requestApproval: async () => { prompts++; return true; } });
-  await assert.rejects(policy.authorize(await browser.tabs.get(2)), { code: 'CONTENT_SCOPE' });
+  assert.equal(policy.settings.contentScope, 'active');
   await policy.authorize(await browser.tabs.get(1));
   const expiry = now + SESSION_MS; assert.equal(policy.expiresAt, expiry);
   now += 60000; await policy.authorize(await browser.tabs.get(1));
@@ -228,6 +228,274 @@ test('content defaults active-only and asks once per fixed twelve-hour session, 
   now = expiry; await policy.authorize(await browser.tabs.get(1));
   assert.equal(prompts, 2);
   const restarted = new ContentAccess(browser); assert.equal(restarted.expiresAt, null);
+});
+
+test('a background read prompts for its own page and leaves the active-tab default and session unchanged', async () => {
+  const browser = mockBrowser([{ id: 1, active: true }, { id: 2, url: 'https://background.test/article', title: 'Background article' }]);
+  const requests = [];
+  const policy = new ContentAccess(browser, { requestApproval: async request => { requests.push(request); return true; } });
+  const service = createService(browser, { contentAccess: policy });
+  const result = await service.handle('read_content', { tabId: 2, maxChars: 7 });
+  assert.equal(result.tabId, 2); assert.equal(result.content, 'Visible');
+  assert.deepEqual(requests, [{ tabId: 2, url: 'https://background.test/article', title: 'Background article', mode: 'ask-session', scope: 'tab' }]);
+  assert.equal(policy.settings.contentScope, 'active'); assert.equal(policy.expiresAt, null);
+  assert.equal(browser.tabMap.get(1).active, true); assert.equal(browser.tabMap.get(2).active, false);
+  assert.equal(browser.calls.some(call => call[0] === 'update' || call[0] === 'updateWindow'), false);
+  await service.handle('read_content', { tabId: 1 });
+  assert.equal(requests.length, 2); assert.equal(requests[1].scope, 'active');
+});
+
+test('denied, disabled and rejected background reads never extract page content', async () => {
+  for (const scenario of ['deny', 'disabled', 'rejected']) {
+    const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+    let prompts = 0;
+    const policy = new ContentAccess(browser, {
+      settings: { enabled: scenario !== 'disabled', contentMode: scenario === 'deny' ? 'deny' : 'ask-session', contentScope: 'active' },
+      requestApproval: async request => { prompts++; assert.equal(request.scope, 'tab'); return false; }
+    });
+    const service = createService(browser, { contentAccess: policy });
+    await assert.rejects(service.handle('read_content', { tabId: 2 }), { code: scenario === 'disabled' ? 'MCP_DISABLED' : 'CONTENT_DENIED' });
+    assert.equal(prompts, scenario === 'rejected' ? 1 : 0);
+    assert.equal(policy.expiresAt, null);
+    assert.equal(browser.calls.some(call => call[0] === 'executeScript'), false);
+  }
+});
+
+test('background session grants are independent per target and expire twelve hours after approval without sliding', async () => {
+  const started = 1000; let now = started;
+  const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }, { id: 3 }]);
+  const requests = [];
+  const policy = new ContentAccess(browser, { now: () => now, requestApproval: async request => { requests.push(request); return true; } });
+  const service = createService(browser, { contentAccess: policy });
+  await service.handle('read_content', { tabId: 2 });
+  assert.equal(policy.expiresAt, null);
+  now += 60000; await service.handle('read_content', { tabId: 1 });
+  const activeExpiry = policy.expiresAt;
+  now += 60000; await service.handle('read_content', { tabId: 3 });
+  now += 60000; await service.handle('read_content', { tabId: 2 });
+  assert.deepEqual(requests.map(request => request.tabId), [2, 1, 3]);
+  assert.equal(policy.expiresAt, activeExpiry);
+  now = started + SESSION_MS;
+  await service.handle('read_content', { tabId: 2 });
+  await service.handle('read_content', { tabId: 1 });
+  await service.handle('read_content', { tabId: 3 });
+  assert.deepEqual(requests.map(request => request.tabId), [2, 1, 3, 2]);
+  assert.equal(policy.expiresAt, activeExpiry);
+});
+
+test('every-time and allow modes require a new one-off approval for each background read', async () => {
+  for (const mode of ['ask-every-time', 'allow']) {
+    const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+    const requests = [];
+    const policy = new ContentAccess(browser, {
+      settings: { enabled: true, contentMode: mode, contentScope: 'active' },
+      requestApproval: async request => { requests.push(request); return true; }
+    });
+    const service = createService(browser, { contentAccess: policy });
+    await service.handle('read_content', { tabId: 2 });
+    await service.handle('read_content', { tabId: 2 });
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map(request => [request.mode, request.scope]), [['ask-every-time', 'tab'], ['ask-every-time', 'tab']]);
+    assert.equal(policy.expiresAt, null);
+    await service.handle('read_content', { tabId: 1 });
+    assert.equal(requests.length, mode === 'allow' ? 2 : 3);
+  }
+});
+
+test('background grants are revoked by navigation, changed settings, closing and discarding the tab', async () => {
+  for (const change of ['url', 'settings', 'close', 'discard']) {
+    const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+    const requests = [];
+    const policy = new ContentAccess(browser, { requestApproval: async request => { requests.push(request); return true; } });
+    const service = createService(browser, { contentAccess: policy });
+    await service.handle('read_content', { tabId: 2 });
+    if (change === 'url') {
+      browser.tabMap.get(2).url = 'https://navigated.test/';
+      browser.tabs.onUpdated.emit(2, { url: browser.tabMap.get(2).url }, clone(browser.tabMap.get(2)));
+      await service.handle('read_content', { tabId: 2 });
+      browser.tabMap.get(2).url = 'https://example.com/';
+      browser.tabs.onUpdated.emit(2, { url: browser.tabMap.get(2).url }, clone(browser.tabMap.get(2)));
+    }
+    if (change === 'settings') {
+      policy.setSettings({ enabled: true, contentMode: 'deny', contentScope: 'active' });
+      policy.setSettings({ enabled: true, contentMode: 'ask-session', contentScope: 'active' });
+    }
+    if (change === 'close') {
+      await browser.tabs.remove(2);
+      const replacement = await browser.tabs.create({ active: false, url: 'https://example.com/' });
+      assert.equal(replacement.id, 2);
+    }
+    if (change === 'discard') {
+      await browser.tabs.discard(2);
+      await assert.rejects(service.handle('read_content', { tabId: 2 }), { code: 'TAB_DISCARDED' });
+      assert.equal(requests.length, 1);
+      await browser.tabs.reload(2, {});
+    }
+    await service.handle('read_content', { tabId: 2 });
+    assert.equal(requests.length, change === 'url' ? 3 : 2);
+    assert.equal(policy.expiresAt, null);
+  }
+});
+
+test('resetting approvals revokes active and background sessions and requires fresh approval', async () => {
+  const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+  const requests = [];
+  const policy = new ContentAccess(browser, { requestApproval: async request => { requests.push(request); return true; } });
+  const service = createService(browser, { contentAccess: policy });
+  await service.handle('read_content', { tabId: 1 });
+  await service.handle('read_content', { tabId: 2 });
+  await service.handle('read_content', { tabId: 2 });
+  assert.deepEqual(requests.map(request => request.tabId), [1, 2]);
+  assert.notEqual(policy.expiresAt, null);
+  const revision = policy.revision;
+  policy.resetApprovals();
+  assert.equal(policy.revision, revision + 1); assert.equal(policy.expiresAt, null);
+  await service.handle('read_content', { tabId: 2 });
+  assert.equal(policy.expiresAt, null);
+  await service.handle('read_content', { tabId: 1 });
+  assert.deepEqual(requests.map(request => request.tabId), [1, 2, 2, 1]);
+});
+
+test('resetting approvals during extraction rejects an already approved background result', async () => {
+  const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+  const policy = new ContentAccess(browser, { requestApproval: async () => true });
+  const execute = browser.tabs.executeScript;
+  browser.tabs.executeScript = async function (id, options) { const result = await execute.call(this, id, options); policy.resetApprovals(); return result; };
+  const service = createService(browser, { contentAccess: policy });
+  await assert.rejects(service.handle('read_content', { tabId: 2 }), { code: 'PERMISSION_CHANGED' });
+  assert.equal(policy.expiresAt, null);
+});
+
+test('resetting after the final approval guard cannot reinstate an active or background session', async () => {
+  for (const tabId of [1, 2]) {
+    const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+    let prompts = 0, approvalAccepted = false, resetPending = true;
+    const policy = new ContentAccess(browser, { requestApproval: async () => { prompts++; approvalAccepted = true; return true; } });
+    const guardName = tabId === 1 ? 'assertScope' : 'assertTarget';
+    const guard = policy[guardName];
+    policy[guardName] = async function (...args) {
+      const result = await guard.apply(this, args);
+      if (approvalAccepted && resetPending) { resetPending = false; this.resetApprovals(); }
+      return result;
+    };
+    const service = createService(browser, { contentAccess: policy });
+    await assert.rejects(service.handle('read_content', { tabId }), { code: 'PERMISSION_CHANGED' });
+    assert.equal(resetPending, false); assert.equal(policy.expiresAt, null);
+    assert.equal(policy.tabGrants.size, 0);
+    assert.equal(browser.calls.some(call => call[0] === 'executeScript'), false);
+    const result = await service.handle('read_content', { tabId });
+    assert.equal(result.content, 'Visible page text'); assert.equal(prompts, 2);
+  }
+});
+
+test('resetting after the final extraction guard cannot release content with a one-off approval', async () => {
+  const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+  let extracted = false, resetPending = true;
+  const policy = new ContentAccess(browser, {
+    settings: { enabled: true, contentMode: 'allow', contentScope: 'active' },
+    requestApproval: async () => true
+  });
+  const execute = browser.tabs.executeScript;
+  browser.tabs.executeScript = async function (id, options) { const result = await execute.call(this, id, options); extracted = true; return result; };
+  const guard = policy.assertScope;
+  policy.assertScope = async function (...args) {
+    const result = await guard.apply(this, args);
+    if (extracted && resetPending) { resetPending = false; this.resetApprovals(); }
+    return result;
+  };
+  const service = createService(browser, { contentAccess: policy });
+  await assert.rejects(service.handle('read_content', { tabId: 2 }), { code: 'PERMISSION_CHANGED' });
+  assert.equal(resetPending, false);
+  assert.equal(browser.calls.filter(call => call[0] === 'executeScript').length, 1);
+});
+
+test('a target grant survives tab activation without granting an active-tab session', async () => {
+  const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+  const requests = [];
+  const policy = new ContentAccess(browser, { requestApproval: async request => { requests.push(request); return true; } });
+  const service = createService(browser, { contentAccess: policy });
+  await service.handle('read_content', { tabId: 2 });
+  browser.tabMap.get(1).active = false; browser.tabMap.get(2).active = true;
+  browser.tabs.onActivated.emit({ tabId: 2, windowId: 1 });
+  await service.handle('read_content', { tabId: 2 });
+  assert.equal(requests.length, 1); assert.equal(policy.expiresAt, null);
+  browser.tabMap.get(1).active = true; browser.tabMap.get(2).active = false;
+  browser.tabs.onActivated.emit({ tabId: 1, windowId: 1 });
+  await service.handle('read_content', { tabId: 2 });
+  assert.equal(requests.length, 1);
+  await service.handle('read_content', { tabId: 1 });
+  assert.deepEqual(requests.map(request => request.tabId), [2, 1]);
+});
+
+test('a background session that expires while extracting content cannot release the result', async () => {
+  let now = 1000;
+  const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+  const policy = new ContentAccess(browser, { now: () => now, requestApproval: async () => true });
+  const execute = browser.tabs.executeScript;
+  browser.tabs.executeScript = async function (id, options) { const result = await execute.call(this, id, options); now += SESSION_MS; return result; };
+  const service = createService(browser, { contentAccess: policy });
+  await assert.rejects(service.handle('read_content', { tabId: 2 }), { code: 'SESSION_EXPIRED' });
+  assert.equal(policy.expiresAt, null);
+});
+
+test('background results are rejected if their page or approval changes during extraction', async () => {
+  for (const change of ['url', 'away-and-back', 'settings', 'close', 'discard']) {
+    const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+    const policy = new ContentAccess(browser, { requestApproval: async () => true });
+    const execute = browser.tabs.executeScript;
+    browser.tabs.executeScript = async function (id, options) {
+      const result = await execute.call(this, id, options);
+      if (change === 'url' || change === 'away-and-back') {
+        browser.tabMap.get(id).url = 'https://different.test/';
+        browser.tabs.onUpdated.emit(id, { url: browser.tabMap.get(id).url }, clone(browser.tabMap.get(id)));
+        if (change === 'away-and-back') {
+          browser.tabMap.get(id).url = 'https://example.com/';
+          browser.tabs.onUpdated.emit(id, { url: browser.tabMap.get(id).url }, clone(browser.tabMap.get(id)));
+        }
+      }
+      if (change === 'settings') policy.setSettings({ enabled: true, contentMode: 'allow', contentScope: 'active' });
+      if (change === 'close') await browser.tabs.remove(id);
+      if (change === 'discard') await browser.tabs.discard(id);
+      return result;
+    };
+    const service = createService(browser, { contentAccess: policy });
+    await assert.rejects(service.handle('read_content', { tabId: 2 }), error => {
+      if (change === 'close') return /No tab 2/.test(error.message);
+      return error.code === { url: 'PAGE_CHANGED', 'away-and-back': 'PAGE_CHANGED', settings: 'PERMISSION_CHANGED', discard: 'TAB_DISCARDED' }[change];
+    });
+    assert.equal(browser.calls.filter(call => call[0] === 'executeScript').length, 1);
+  }
+});
+
+test('background approval cannot survive navigation away and back before extracting content', async () => {
+  const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }]);
+  const policy = new ContentAccess(browser, { requestApproval: async () => {
+    for (const url of ['https://different.test/', 'https://example.com/']) {
+      browser.tabMap.get(2).url = url;
+      browser.tabs.onUpdated.emit(2, { url }, clone(browser.tabMap.get(2)));
+    }
+    return true;
+  } });
+  const service = createService(browser, { contentAccess: policy });
+  await assert.rejects(service.handle('read_content', { tabId: 2 }), { code: 'PAGE_CHANGED' });
+  assert.equal(browser.calls.some(call => call[0] === 'executeScript'), false);
+  assert.equal(policy.expiresAt, null);
+});
+
+test('one-off approval is bound to its target and cannot authorize content from another background tab', async () => {
+  const browser = mockBrowser([{ id: 1, active: true }, { id: 2 }, { id: 3 }]);
+  let prompts = 0;
+  const policy = new ContentAccess(browser, {
+    settings: { enabled: true, contentMode: 'allow', contentScope: 'active' },
+    requestApproval: async () => { prompts++; return true; }
+  });
+  const authorization = {}, revision = policy.revision;
+  const target = await browser.tabs.get(2);
+  await policy.authorize(target, authorization);
+  await policy.assertAfterRead(target.id, target.url, revision, authorization);
+  const other = await browser.tabs.get(3);
+  await assert.rejects(policy.assertAfterRead(other.id, other.url, revision, authorization), { code: 'CONTENT_SCOPE' });
+  assert.equal(prompts, 1);
 });
 
 test('deny, allow, every-time, disabled mode and setting changes apply without cached permission bypass', async () => {

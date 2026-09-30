@@ -6,14 +6,16 @@ echo Firefox - Codex MCP
 echo.
 echo [1] Erzeugen + Installieren
 echo [2] Nur Erzeugen
-echo [3] Deinstallieren
+echo [3] Add-on im Firefox neu laden
+echo [4] Deinstallieren
 echo [0] Beenden
 echo.
 echo Ziffer ohne Eingabetaste druecken.
-choice /C 1230 /N /M "Auswahl [1/2/3/0]: "
+choice /C 12340 /N /M "Auswahl [1/2/3/4/0]: "
 if errorlevel 255 goto choice_error
-if errorlevel 4 goto cancelled
-if errorlevel 3 goto uninstall
+if errorlevel 5 goto cancelled
+if errorlevel 4 goto uninstall
+if errorlevel 3 goto reload
 if errorlevel 2 goto generate
 if errorlevel 1 goto install
 goto cancelled
@@ -25,6 +27,11 @@ goto result
 
 :generate
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" -GenerateOnly
+set "operationExit=%errorlevel%"
+goto result
+
+:reload
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" -OpenFirefoxOnly
 set "operationExit=%errorlevel%"
 goto result
 
@@ -43,7 +50,7 @@ exit /b 0
 
 :result
 echo.
-if "%operationExit%"=="0" (
+if "%operationExit%" == "0" (
     echo Vorgang erfolgreich abgeschlossen. Bitte die angezeigten naechsten Schritte beachten.
 ) else (
     echo Vorgang fehlgeschlagen. Fehlercode: %operationExit%

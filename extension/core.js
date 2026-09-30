@@ -327,8 +327,8 @@
           let tab = await browser.tabs.get(p.tabId);
           if (tab.discarded) throw new BridgeError("TAB_DISCARDED", "Tab ist entladen. Erst ausdrücklich reload_tabs aufrufen, dann erneut lesen.");
           if (!/^https?:\/\//i.test(tab.url || "")) throw new BridgeError("RESTRICTED_PAGE", "Seiteninhalt ist nur für HTTP(S)-Seiten verfügbar; interne Firefox- und Erweiterungsseiten sind ausgeschlossen.");
-          const authorizedUrl = tab.url, policyRevision = options.contentAccess?.revision;
-          if (options.contentAccess) tab = await options.contentAccess.authorize(tab);
+          const authorizedUrl = tab.url, policyRevision = options.contentAccess?.revision, authorization = {};
+          if (options.contentAccess) tab = await options.contentAccess.authorize(tab, authorization);
           context.assertLive?.();
           if (tab.discarded) throw new BridgeError("TAB_DISCARDED", "Der Tab wurde während der Freigabe entladen. Zuerst ausdrücklich reload_tabs aufrufen.");
           const extraction = { format: p.format ?? "text", maxChars: p.maxChars ?? 30000, includeLinks: p.includeLinks ?? false, ...(p.selector ? { selector: p.selector } : {}) };
@@ -339,7 +339,7 @@
           if (result.extractionError) throw new BridgeError(result.extractionError, result.message);
           context.assertLive?.();
           if (result.url !== authorizedUrl) throw new BridgeError("PAGE_CHANGED", "Die Seite wurde während des Auslesens gewechselt. Erneut anfragen.");
-          if (options.contentAccess) await options.contentAccess.assertAfterRead(p.tabId, authorizedUrl, policyRevision);
+          if (options.contentAccess) await options.contentAccess.assertAfterRead(p.tabId, authorizedUrl, policyRevision, authorization);
           context.assertLive?.();
           return { tabId: p.tabId, ...result };
         }

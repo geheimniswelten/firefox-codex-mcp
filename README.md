@@ -31,7 +31,7 @@ Die Dateien sind Quellcode und eine unsignierte Entwicklungs-Erweiterung. Sie si
    install.cmd
    ```
 
-   Das CHOICE-Menü bietet **1: Erzeugen + Installieren** (`install.ps1`), **2: Nur Erzeugen** (`install.ps1 -GenerateOnly`), **3: Deinstallieren** (`uninstall.ps1`) und **0: Beenden**. Eine Ziffer ohne Enter drücken. Nach dem Vorgang bleibt das Fenster bis zur ausdrücklichen Eingabe von **0** offen. Die PowerShell-Dateien lassen sich auch direkt aufrufen.
+   Das CHOICE-Menü bietet **1: Erzeugen + Installieren** (`install.ps1`), **2: Nur Erzeugen** (`install.ps1 -GenerateOnly`), **3: Add-on im Firefox neu laden** (`install.ps1 -OpenFirefoxOnly`), **4: Deinstallieren** (`uninstall.ps1`) und **0: Beenden**. Eine Ziffer ohne Enter drücken. Nach dem Vorgang bleibt das Fenster bis zur ausdrücklichen Eingabe von **0** offen. Die PowerShell-Dateien lassen sich auch direkt aufrufen.
 
    Fehlen Node oder npm, lädt das Skript das passende Windows-ZIP von [nodejs.org](https://nodejs.org/en/download), prüft dessen SHA256-Prüfsumme und entpackt es im Projekt. Es ändert weder den systemweiten Windows-Pfad noch eine vorhandene Node-Installation. Internetzugriff ist für den ersten Download und die Paketinstallation nötig. `install.ps1 -NoDownload` unterbindet den automatischen Node-Download; dann muss bereits ein geeignetes Node samt npm vorhanden sein. Eine einmal eingerichtete Projekt-Runtime wird wiederverwendet.
 
@@ -49,6 +49,8 @@ Die Dateien sind Quellcode und eine unsignierte Entwicklungs-Erweiterung. Sie si
 5. Die MCP-Verbindung betroffener KI-Apps neu laden oder die Apps neu starten. Claude Code in VS Code benötigt eine neue Konversation; Gemini Code Assist gegebenenfalls **Developer: Reload Window**. Zunächst `firefox_status`, danach `firefox_get_current` aufrufen.
 
 Temporäre Firefox-Add-ons verschwinden beim Firefox-Neustart und müssen dann erneut geladen werden. Für dauerhafte Installation in regulärem Firefox muss die Erweiterung über Mozilla signiert werden, beispielsweise als nicht öffentlich gelistetes Add-on. Das mit `npm run package` erzeugte ZIP ist noch nicht signiert. Siehe [temporäre Installation](https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/) und [Signieren und Verteilen](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
+
+Zum erneuten Laden nach einem Firefox-Neustart oder zum Übernehmen von Änderungen im Menü die **3** wählen, alternativ `.\install.ps1 -OpenFirefoxOnly` aufrufen. Dies öffnet ausschließlich `about:debugging#/runtime/this-firefox` und zeigt den vollständigen Pfad zu `extension/manifest.json`. Dort **Temporäres Add-on laden** wählen; falls das Add-on noch angezeigt wird, **Neu laden** anklicken. Die Aktion benötigt weder Node noch npm und verändert keine Native-Host- oder KI-Client-Registrierung. Wenn Firefox nicht gefunden oder gestartet werden kann, bleiben Adresse und Pfad sichtbar; dieser Menüpunkt meldet dann Fehlercode `1`.
 
 ## Automatische Einrichtung der KI-Clients
 
@@ -99,7 +101,13 @@ Die Freigabefrage erscheint direkt im Popup des Add-ons. Dazu wird das zuletzt a
 
 Während eine Antwort aussteht, zeigt das Add-on-Symbol ein **„?“**. Ab Firefox 149 kann das Popup automatisch geöffnet werden. In Firefox 140–148 oder wenn Firefox das Öffnen verhindert, auf das Add-on-Symbol beziehungsweise auf **Erweiterungen → Firefox ↔ Codex MCP** klicken. Das Schließen des Popups erteilt keine Freigabe: Bis zum Ablauf der ursprünglichen zwei Minuten lässt es sich erneut öffnen. Nur **Freigeben** erlaubt den Zugriff; **Ablehnen** beendet die Anfrage sofort. Quellen: [browserAction.openPopup](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/browserAction/openPopup), [Firefox 149: Aufruf ohne Benutzeraktion](https://bugzilla.mozilla.org/show_bug.cgi?id=1799344), [Fenster aktivieren](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/windows/update).
 
-Der Inhaltsumfang ist wahlweise **alle Tabs** oder **nur der aktive Tab des zuletzt aktiven Firefox-Fensters**. Standard ist **Sitzungsfreigabe + aktiver Tab**. Das bezieht sich auf das Lesen der Seite; das Auflisten von Tab-Metadaten und die ausdrücklich angeforderte Tabsteuerung bleiben bei aktivem MCP möglich. Ein anderer Tab wird nicht automatisch aktiviert, um die Inhaltsregel zu umgehen. Entladene Tabs werden durch Inhaltslesen nicht aufgeweckt.
+Der Inhaltsumfang ist wahlweise **alle Tabs** oder **aktiver Tab; andere Tabs einzeln auf Anfrage**. Standard ist **Sitzungsfreigabe + aktiver Tab**. Eine Inhaltsanfrage für einen anderen Tab öffnet ebenfalls die Freigabefrage, ohne den Tab zu aktivieren oder die Einstellung auf „Alle Tabs“ umzustellen. Die Frage nennt Titel und URL des angefragten Tabs.
+
+Im Sitzungsmodus gilt eine solche Freigabe ausschließlich für **diesen Tab und genau diese URL**, mit eigenen festen 12 Stunden ab Zustimmung. Sie ist von der Freigabe für den jeweils aktiven Tab getrennt und erlaubt weder andere Tabs noch andere URLs. Ein Wechsel der URL, Entladen oder Schließen des Tabs widerruft seine Freigabe; eine Rückkehr zur vorherigen URL stellt sie nicht wieder her. Bei „Erlauben“ oder „Jedes Mal fragen“ muss jede Anfrage für einen anderen Tab einzeln bestätigt werden. „Nicht erlauben“ sperrt weiterhin sämtliche Inhaltsanfragen. Bei „Alle Tabs“ gelten die gewählten Inhaltsregeln für alle Tabs wie bisher.
+
+**„Temporäre Freigaben zurücksetzen“** widerruft alle aktiven Sitzungs- und Tabfreigaben sofort und lehnt eine offene Freigabefrage ab. Die gewählten Inhaltsregeln bleiben erhalten; die nächste Anfrage fragt entsprechend diesen Regeln erneut.
+
+Diese Regeln betreffen das Lesen der Seite; das Auflisten von Tab-Metadaten und die ausdrücklich angeforderte Tabsteuerung bleiben bei aktivem MCP möglich. Entladene Tabs werden durch Inhaltslesen nicht aufgeweckt.
 
 ## Werkzeuge
 
@@ -170,7 +178,7 @@ Unter Linux/macOS erzeugt `npm run setup` eine ausführbare Shell-Startdatei. Da
 
 ## Deinstallation
 
-In `install.cmd` die **3** wählen oder `uninstall.ps1` ausführen. Das funktioniert auch aus einer neu heruntergeladenen Kopie, etwa im Downloadordner, wenn der ursprüngliche Projektordner bereits gelöscht wurde. Eine erneute Installation ist dafür nicht erforderlich; das Entfernen der Native-Host-Registrierung und der zugehörigen lokalen Dateien benötigt weder Node noch npm.
+In `install.cmd` die **4** wählen oder `uninstall.ps1` ausführen. Das funktioniert auch aus einer neu heruntergeladenen Kopie, etwa im Downloadordner, wenn der ursprüngliche Projektordner bereits gelöscht wurde. Eine erneute Installation ist dafür nicht erforderlich; das Entfernen der Native-Host-Registrierung und der zugehörigen lokalen Dateien benötigt weder Node noch npm.
 
 Das Skript ermittelt die frühere Installation aus der benutzerspezifischen Native-Messaging-Registrierung `de.codex.firefox_bridge`. Es entfernt diesen Eintrag auch bei fehlendem ursprünglichem Ordner. Ist der registrierte Pfad erkennbar, beendet es eindeutig dieser Installation zugeordnete Brücken-/MCP-Prozesse und entfernt deren bekannte erzeugte Dateien in `.local`, soweit noch vorhanden. Der Speicherort der neuen Downloadkopie muss damit nicht übereinstimmen.
 

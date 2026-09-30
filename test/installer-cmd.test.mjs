@@ -76,13 +76,15 @@ test('CMD menu uses CRLF, safe quoted paths, inline PowerShell and descending ch
   assert.doesNotMatch(cmd, /(?<!\r)\n/);
   assert.match(cmd, /setlocal DisableDelayedExpansion\r\n/);
   assert.match(cmd, /set "PSModulePath="/);
-  assert.match(cmd, /choice \/C 1230 \/N \/M/i);
+  assert.match(cmd, /choice \/C 12340 \/N \/M/i);
+  assert.match(cmd, /\[3\] Add-on im Firefox neu laden/);
   assert.match(cmd, /Ziffer ohne Eingabetaste druecken/);
   const branches = [...cmd.matchAll(/if errorlevel (\d+) goto (\w+)/gi)].map(match => [Number(match[1]), match[2]]);
-  assert.deepEqual(branches, [[255, 'choice_error'], [4, 'cancelled'], [3, 'uninstall'], [2, 'generate'], [1, 'install']]);
+  assert.deepEqual(branches, [[255, 'choice_error'], [5, 'cancelled'], [4, 'uninstall'], [3, 'reload'], [2, 'generate'], [1, 'install']]);
   assert.match(cmd, /:install\r\npowershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\.ps1"\r\nset "operationExit=%errorlevel%"/);
   assert.match(cmd, /:generate\r\npowershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\.ps1" -GenerateOnly/);
   assert.match(cmd, /:uninstall\r\npowershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall\.ps1"/);
+  assert.match(cmd, /:reload\r\npowershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\.ps1" -OpenFirefoxOnly\r\nset "operationExit=%errorlevel%"/);
   assert.match(cmd, /choice \/C 0 \/N \/M "Zum Schliessen 0 druecken: "\r\nexit \/b %operationExit%/);
   assert.doesNotMatch(cmd, /^\s*(?:start|pause)\b|Set-ExecutionPolicy|taskkill|rd \/s|rmdir \/s/im);
 });
@@ -92,10 +94,11 @@ test('real CMD forwards all operations and ignores queued Enter until explicit c
   for (const operation of [
     { key: '1', script: 'install.ps1', args: [], exitCode: 17 },
     { key: '2', script: 'install.ps1', args: ['-GenerateOnly'], exitCode: 0 },
-    { key: '3', script: 'uninstall.ps1', args: [], exitCode: 23 },
+    { key: '3', script: 'install.ps1', args: ['-OpenFirefoxOnly'], exitCode: 0 },
+    { key: '4', script: 'uninstall.ps1', args: [], exitCode: 23 },
   ]) {
     const current = run(t, root, operation);
-    await current.waitFor('Auswahl [1/2/3/0]:');
+    await current.waitFor('Auswahl [1/2/3/4/0]:');
     current.child.stdin.write(`${operation.key}\r\n`);
     await current.waitFor(resultPrompt);
     await delay(200);
@@ -112,7 +115,7 @@ test('real CMD forwards all operations and ignores queued Enter until explicit c
 test('a missing PowerShell executable stays visible and returns its original error after explicit close', { skip: !windows, timeout: 20_000 }, async t => {
   const root = await fixture(t);
   const current = run(t, root, { missingPowerShell: true });
-  await current.waitFor('Auswahl [1/2/3/0]:');
+  await current.waitFor('Auswahl [1/2/3/4/0]:');
   current.child.stdin.write('1\r\n');
   await current.waitFor(resultPrompt);
   await delay(200);
@@ -127,7 +130,7 @@ test('a missing PowerShell executable stays visible and returns its original err
 test('menu exit requires no operation and returns success immediately', { skip: !windows, timeout: 20_000 }, async t => {
   const root = await fixture(t);
   const current = run(t, root);
-  await current.waitFor('Auswahl [1/2/3/0]:');
+  await current.waitFor('Auswahl [1/2/3/4/0]:');
   current.child.stdin.end('0');
   const result = await current.done;
   assert.equal(result.code, 0, result.output);

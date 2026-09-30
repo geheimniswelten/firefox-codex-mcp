@@ -17,10 +17,11 @@ function renderApproval(approval) {
   }
   el("approvalTitle").textContent = approval.title || "Ohne Titel";
   el("approvalUrl").textContent = approval.url;
-  const scope = approval.scope === "active" ? "jeweils den aktiven Tab im zuletzt aktiven Firefox-Fenster" : "alle Tabs";
+  const scope = approval.scope === "tab" ? "diesen Tab mit genau der oben angegebenen URL" : approval.scope === "active" ? "jeweils den aktiven Tab im zuletzt aktiven Firefox-Fenster" : "alle Tabs";
   el("approvalDescription").textContent = approval.mode === "ask-session"
     ? `Für ${scope} freigeben: bis zu 12 Stunden ab Freigabe, spätestens bis Firefox neu startet. Diese Frist verlängert sich nicht durch Zugriffe.`
     : `Nur diese Anfrage für ${scope} freigeben. Bei der nächsten Inhaltsanfrage wird erneut gefragt.`;
+  if (approval.scope === "tab") el("approvalDescription").textContent += " Andere Tabs und andere URLs benötigen eine eigene Freigabe.";
   const expired = !Number.isFinite(approval.expiresAt) || Date.now() >= approval.expiresAt;
   el("approvalAllow").disabled = approvalSubmitting || expired;
   el("approvalDeny").disabled = approvalSubmitting || expired;
@@ -127,6 +128,7 @@ el("toggle").addEventListener("click", () => save({ enabled: !settings.enabled }
 el("contentMode").addEventListener("change", event => save({ contentMode: event.target.value }));
 el("contentScope").addEventListener("change", event => save({ contentScope: event.target.value }));
 el("reconnect").addEventListener("click", () => request({ type: "bridge_reconnect" }));
+el("resetApprovals").addEventListener("click", () => request({ type: "bridge_reset_approvals" }));
 el("inventoryPermission").addEventListener("click", changeInventoryPermission);
 el("approvalDeny").addEventListener("click", () => answerApproval(false));
 el("approvalAllow").addEventListener("click", () => answerApproval(true));

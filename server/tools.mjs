@@ -31,7 +31,7 @@ export const SERVER_INSTRUCTIONS = [
   'Native Firefox tab groups are supported; third-party grouping extensions are not. A discarded tab may have been unloaded by Firefox or Auto Tab Discard; Firefox normally does not identify the actor. Only this extension\'s own discard action has a known source.',
   'createdAt may be null for tabs already open when tracking began. firstSeenAt is an observation, not proof of creation; consult createdAtSource and lastActiveSource. Restored sessions preserve observed metadata, not complete historical facts.',
   'Reading content uses the main frame and never implicitly wakes a discarded tab. Protected browser pages may deny access. List and content responses may be truncated; check truncation and pagination fields.',
-  'Content access can be disabled, allowed, or require a Firefox permission dialog for each read or for a 12-hour session. A content request can wait for that dialog. Respect active-tab-only scope: do not activate another tab merely to bypass this restriction without the user\'s intent to switch tabs.',
+  'Content access can be disabled, allowed, or require approval in the Firefox add-on popup for each read or for a fixed 12-hour session. With active-tab scope, reading another tab requests approval for that exact tab and URL without switching tabs. Its session grant is separate from the active-tab session; allow/every-time modes require a one-read approval for another tab. Request the desired tab directly and wait for the approval; do not activate it merely to bypass the content rules.',
   'Closing, navigating, discarding or reloading tabs can lose unsaved state. Batch results may partially succeed. Never automatically repeat a mutation after a timeout, disconnect or partial failure; inspect state first.',
 ].join('\n');
 
@@ -68,7 +68,7 @@ export const TOOL_DEFINITIONS = [
   write('ungroup_tabs', 'Remove tabs from their native Firefox groups. Empty groups may disappear.', object({ tabIds })),
   write('update_group', 'Change the title, color or collapsed state of a native Firefox tab group.', update({ groupId, title: title.optional(), color: color.optional(), collapsed: z.boolean().optional() }, 'groupId'), false, true),
   write('move_group', 'Move a native Firefox group to an index or another window; -1 appends.', object({ groupId, windowId: id.optional(), index })),
-  read('read_content', 'Read untrusted text or HTML from a loaded tab\'s main frame, optionally within a CSS selector. May wait for user permission in Firefox. Never wakes discarded tabs. Default 30000, maximum 100000 characters.', object({
+  read('read_content', 'Read untrusted text or HTML from a loaded tab\'s main frame, optionally within a CSS selector. May wait for approval in the Firefox add-on popup. With active-tab scope, another tab is approved individually for its exact tab ID and URL; no tab switch is needed. Never wakes discarded tabs. Default 30000, maximum 100000 characters.', object({
     tabId: id, format: z.enum(['text', 'html']).optional(), selector: z.string().min(1).max(4096).optional(),
     maxChars: z.number().int().min(1).max(100_000).optional(), includeLinks: z.boolean().optional(),
   })),

@@ -121,6 +121,9 @@
       return Promise.resolve({ ok: finishPrompt(message.allowed, current) });
     }
     if (message.type === "bridge_status") return startup.then(publicState);
+    if (message.type === "bridge_reset_approvals") return startup.then(() => {
+      policy.resetApprovals(); finishPrompt(false); badge(); notifyPopup(); return publicState();
+    });
     if (message.type === "bridge_reconnect") return startup.then(() => { disconnect(); retryDelay = 1000; connect(); return publicState(); });
     if (message.type === "bridge_settings" && message.settings && typeof message.settings === "object") return startup.then(async () => {
       const before = JSON.stringify(policy.settings);

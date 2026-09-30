@@ -1,4 +1,4 @@
-# Opening this interactive page is requested by the user after installation.
+# Open the interactive page after installation or through the reload menu item.
 # Dot-sourcing only defines the functions; it does not start Firefox.
 function Find-FirefoxExecutable {
     $candidates = New-Object 'System.Collections.Generic.List[string]'
@@ -38,6 +38,7 @@ function Open-FirefoxSetupPage {
     $url = 'about:debugging#/runtime/this-firefox'
     Write-Host ('Firefox-Einrichtung: ' + $url)
     Write-Host ('Dort unter "Temporaeres Add-on laden" auswaehlen: ' + [IO.Path]::Combine($ProjectRoot, 'extension\manifest.json'))
+    Write-Host 'Falls das Add-on noch angezeigt wird, dort "Neu laden" anklicken.'
     $firefoxPath = Find-FirefoxExecutable
     if (-not $firefoxPath) {
         Write-Warning 'Firefox wurde nicht gefunden. Bitte die angezeigte Adresse manuell in Firefox oeffnen.'

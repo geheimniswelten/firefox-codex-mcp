@@ -22,7 +22,11 @@ function deferred() {
 async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 'normal', openError = false, focusError = false, noReceiver = false } = {}) {
   let now = 10000, timerSequence = 0, requestSequence = 0, uuidSequence = 0, policy, reads = 0;
   const timers = new Map(), posted = [], calls = [], notifications = [];
-  const normalWindow = { id: 7, type: 'normal', state: windowState, focused: false, tabs: [{ id: 42, windowId: 7, active: true, url: 'https://example.test/page', title: 'Example title' }] };
+  const normalWindow = { id: 7, type: 'normal', state: windowState, focused: false, tabs: [
+    { id: 42, windowId: 7, active: true, url: 'https://example.test/page', title: 'Example title' },
+    { id: 43, windowId: 7, active: false, url: 'https://background.test/page', title: 'Background title' },
+    { id: 44, windowId: 7, active: false, url: 'https://background.test/page', title: 'Other background tab' },
+  ] };
   const otherWindow = { id: 12, type: 'normal', focused: false, tabs: [{ id: 60, windowId: 12, active: true, url: 'https://other.test/' }] };
   let currentWindow = normalWindow;
   const port = {
@@ -61,7 +65,12 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
       remove: () => assert.fail('Approval must never remove a browser window.'),
     },
     tabs: {
-      get: async id => { assert.equal(id, 42); return clone(normalWindow.tabs[0]); },
+      onUpdated: event(), onRemoved: event(),
+      get: async id => {
+        const tab = [...normalWindow.tabs, ...otherWindow.tabs].find(candidate => candidate.id === id);
+        if (!tab) throw new Error('Tab missing');
+        return clone(tab);
+      },
       update: () => assert.fail('Approval must never activate or change a tab.'),
     },
   };
@@ -74,8 +83,10 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
       return { ready: Promise.resolve(), async handle(method, params, context) {
         assert.equal(method, 'read_content');
         context.assertLive();
-        await policy.authorize(await browser.tabs.get(params.tabId));
+        const tab = await browser.tabs.get(params.tabId), revision = policy.revision, authorization = {};
+        await policy.authorize(tab, authorization);
         context.assertLive();
+        await policy.assertAfterRead(tab.id, tab.url, revision, authorization);
         reads++;
         return { authorized: true };
       } };
@@ -99,9 +110,9 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
     reads: () => reads,
     message,
     status: () => message({ type: 'bridge_status' }),
-    async request() {
+    async request(tabId = 42) {
       const id = `request-${++requestSequence}`;
-      port.onMessage.emit({ id, method: 'read_content', params: { tabId: 42 }, expiresAt: now + 130000 });
+      port.onMessage.emit({ id, method: 'read_content', params: { tabId }, expiresAt: now + 130000 });
       await settle();
       return id;
     },
@@ -113,6 +124,12 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
       await settle();
     },
     showNonNormalWindow() { currentWindow = { id: 99, type: 'popup', focused: true, tabs: [] }; },
+    activeTab: () => normalWindow.tabs.find(tab => tab.active)?.id,
+    navigate(tabId, url) {
+      const tab = normalWindow.tabs.find(candidate => candidate.id === tabId);
+      tab.url = url;
+      browser.tabs.onUpdated.emit(tabId, { url }, clone(tab));
+    },
   };
 }
 
@@ -134,6 +151,129 @@ test('a minimized normal Firefox window is restored before opening its toolbar p
   await bridge.request();
   assert.deepEqual(bridge.calls.filter(call => call[0] === 'focus'), [['focus', 7, { focused: true, state: 'normal' }]]);
   assert.deepEqual(bridge.calls.filter(call => call[0] === 'openPopup'), [['openPopup', { windowId: 7 }]]);
+});
+
+test('background content requests open individual approval without switching tabs, even in allow mode', async () => {
+  for (const mode of ['ask-every-time', 'allow']) {
+    const bridge = await mount({ mode });
+    const requestId = await bridge.request(43);
+    const pending = (await bridge.status()).pendingApproval;
+    assert.deepEqual(pending, { id: 'unique-approval-1', tabId: 43, url: 'https://background.test/page', title: 'Background title', mode: 'ask-every-time', scope: 'tab', expiresAt: 130000 });
+    assert.equal(bridge.activeTab(), 42);
+    assert.equal(bridge.reads(), 0);
+    assert.deepEqual(bridge.calls.filter(call => call[0] === 'openPopup'), [['openPopup', { windowId: 7 }]]);
+    assert.deepEqual(await bridge.message({ type: 'approval_answer', id: pending.id, allowed: true }), { ok: true });
+    await settle();
+    assert.deepEqual(bridge.posted.find(message => message.id === requestId).result, { authorized: true });
+    assert.equal((await bridge.status()).sessionExpiresAt, null);
+    await bridge.request(43);
+    const next = (await bridge.status()).pendingApproval;
+    assert.ok(next);
+    assert.notEqual(next.id, pending.id);
+    assert.equal(next.scope, 'tab');
+    assert.equal(bridge.activeTab(), 42);
+  }
+});
+
+test('an active tab in another window requests individual approval in the current toolbar', async () => {
+  const bridge = await mount();
+  await bridge.request(60);
+  const pending = (await bridge.status()).pendingApproval;
+  assert.equal(pending.tabId, 60);
+  assert.equal(pending.url, 'https://other.test/');
+  assert.equal(pending.scope, 'tab');
+  assert.deepEqual(bridge.calls.filter(call => call[0] === 'openPopup'), [['openPopup', { windowId: 7 }]]);
+  assert.equal(bridge.activeTab(), 42);
+});
+
+test('deny mode blocks background content without creating an approval', async () => {
+  const bridge = await mount({ mode: 'deny' });
+  const requestId = await bridge.request(43);
+  assert.equal((await bridge.status()).pendingApproval, null);
+  assert.equal(bridge.posted.find(message => message.id === requestId).error.code, 'CONTENT_DENIED');
+  assert.equal(bridge.calls.some(call => call[0] === 'openPopup'), false);
+  assert.equal(bridge.reads(), 0);
+});
+
+test('individual session grants stay separate from active sessions and exact tab/URL identity', async () => {
+  const bridge = await mount({ mode: 'ask-session' });
+  await bridge.request(43);
+  const background = (await bridge.status()).pendingApproval;
+  assert.equal(background.scope, 'tab');
+  assert.equal(background.mode, 'ask-session');
+  await bridge.message({ type: 'approval_answer', id: background.id, allowed: true }); await settle();
+  assert.equal((await bridge.status()).sessionExpiresAt, null, 'a tab grant must not create an active-tab session');
+  await bridge.request(42);
+  const active = (await bridge.status()).pendingApproval;
+  assert.equal(active.scope, 'active');
+  await bridge.message({ type: 'approval_answer', id: active.id, allowed: true }); await settle();
+  const activeExpiry = (await bridge.status()).sessionExpiresAt;
+  assert.ok(activeExpiry);
+  const cachedRead = await bridge.request(43);
+  assert.equal((await bridge.status()).pendingApproval, null);
+  assert.deepEqual(bridge.posted.find(message => message.id === cachedRead).result, { authorized: true });
+  await bridge.request(44);
+  const sameUrlOtherTab = (await bridge.status()).pendingApproval;
+  assert.equal(sameUrlOtherTab.tabId, 44, 'an active session and another tab grant must not authorize a different tab with the same URL');
+  assert.equal(sameUrlOtherTab.scope, 'tab');
+  await bridge.message({ type: 'approval_answer', id: sameUrlOtherTab.id, allowed: false }); await settle();
+  bridge.navigate(43, 'https://background.test/new-page');
+  await bridge.request(43);
+  const newUrl = (await bridge.status()).pendingApproval;
+  assert.equal(newUrl.url, 'https://background.test/new-page');
+  assert.equal(newUrl.scope, 'tab');
+  assert.equal((await bridge.status()).sessionExpiresAt, activeExpiry);
+  assert.equal(bridge.activeTab(), 42);
+});
+
+test('individual tab sessions expire at their fixed deadline despite repeated reads', async () => {
+  const bridge = await mount({ mode: 'ask-session' });
+  await bridge.request(43);
+  const pending = (await bridge.status()).pendingApproval;
+  await bridge.message({ type: 'approval_answer', id: pending.id, allowed: true }); await settle();
+  await bridge.advance(60000);
+  await bridge.request(43);
+  assert.equal((await bridge.status()).pendingApproval, null);
+  await bridge.advance(12 * 60 * 60 * 1000 - 60000);
+  await bridge.request(43);
+  assert.equal((await bridge.status()).pendingApproval.scope, 'tab');
+  assert.equal(bridge.calls.filter(call => call[0] === 'openPopup').length, 2);
+  assert.equal(bridge.reads(), 2);
+});
+
+test('resetting temporary approvals revokes active and individual tab sessions without changing settings', async () => {
+  const bridge = await mount({ mode: 'ask-session' });
+  for (const tabId of [42, 43]) {
+    await bridge.request(tabId);
+    const pending = (await bridge.status()).pendingApproval;
+    await bridge.message({ type: 'approval_answer', id: pending.id, allowed: true }); await settle();
+  }
+  const before = await bridge.status();
+  assert.ok(before.sessionExpiresAt);
+  const reset = await bridge.message({ type: 'bridge_reset_approvals' });
+  assert.equal(reset.sessionExpiresAt, null);
+  assert.equal(reset.pendingApproval, null);
+  assert.deepEqual(reset.settings, before.settings);
+  for (const tabId of [43, 42]) {
+    await bridge.request(tabId);
+    const pending = (await bridge.status()).pendingApproval;
+    assert.ok(pending, 'each previously granted scope must ask again');
+    assert.equal(pending.scope, tabId === 43 ? 'tab' : 'active');
+    await bridge.message({ type: 'approval_answer', id: pending.id, allowed: false }); await settle();
+  }
+  assert.equal(bridge.reads(), 2);
+});
+
+test('resetting while approval is pending denies it and rejects a late answer', async () => {
+  const bridge = await mount({ mode: 'ask-session' });
+  const requestId = await bridge.request(43);
+  const pending = (await bridge.status()).pendingApproval;
+  const reset = await bridge.message({ type: 'bridge_reset_approvals' }); await settle();
+  assert.equal(reset.pendingApproval, null);
+  assert.equal(bridge.posted.find(message => message.id === requestId).error.code, 'CONTENT_DENIED');
+  assert.deepEqual(await bridge.message({ type: 'approval_answer', id: pending.id, allowed: true }), { ok: false });
+  assert.equal(bridge.calls.filter(call => call[0] === 'badge').at(-1)[1].text, '');
+  assert.equal(bridge.reads(), 0);
 });
 
 test('gesture-required openPopup failure remains pending and can be answered manually', async () => {

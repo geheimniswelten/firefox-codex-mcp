@@ -39,6 +39,7 @@ function Start-Process {
   // A Node installation may bundle real npm; never accidentally run that in a
   // wrapper fixture. Runtime discovery itself has separate integration tests.
   await appendFile(join(root, 'scripts', 'node-runtime.ps1'), `
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot '..\\runtime-loaded.txt'), 'loaded')
 function Find-FirefoxSystemNodeRuntime {
   if (-not (Test-FirefoxNodeVersion -NodePath $env:FIREFOX_MCP_TEST_NODE)) { throw 'Actual test Node version rejected.' }
   return [pscustomobject]@{ NodePath = $env:FIREFOX_MCP_TEST_NODE; NpmCliPath = (Join-Path $PSScriptRoot 'npm-stub.mjs'); NpmCommandPath = $null }
@@ -101,6 +102,41 @@ test('GenerateOnly forwards explicit port and does not request registration', wi
   await assert.rejects(readFile(join(root, 'browser-open.json')), { code: 'ENOENT' });
   await assert.rejects(readFile(join(root, 'client-args.json')), { code: 'ENOENT' });
   assert.equal(await readFile(join(root, 'sequence.txt'), 'utf8'), 'npm\nsetup\n');
+});
+
+test('OpenFirefoxOnly opens the reload page without Node, npm, setup or client changes', windowsOnly, async t => {
+  const { root, run } = await fixture(t);
+  const result = run(['-OpenFirefoxOnly'], {
+    FIREFOX_MCP_TEST_NODE: join(root, 'missing-node.exe'),
+    FIREFOX_MCP_TEST_NPM_EXIT: '17',
+    FIREFOX_MCP_TEST_SETUP_EXIT: '23',
+    FIREFOX_MCP_TEST_CLIENT_EXIT: '19',
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(await readFile(join(root, 'sequence.txt'), 'utf8'), 'browser\n');
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'browser-open.json'), 'utf8')), {
+    executable: 'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
+    arguments: ['-new-tab', 'about:debugging#/runtime/this-firefox'],
+    windowStyle: 'Normal',
+  });
+  assert.doesNotMatch(result.stdout + result.stderr, /Node\.js:|npm ci|KI-Client-Konfiguration/u);
+  for (const record of ['runtime-loaded.txt', 'npm-args.txt', 'setup-args.json', 'client-args.json', '.runtime']) {
+    await assert.rejects(readFile(join(root, record)), { code: 'ENOENT' });
+  }
+});
+
+test('OpenFirefoxOnly returns failure and manual instructions when Firefox is missing or cannot launch', windowsOnly, async t => {
+  const { root, run } = await fixture(t);
+  for (const browser of ['missing', 'error']) {
+    const result = run(['-OpenFirefoxOnly'], { FIREFOX_MCP_TEST_BROWSER: browser });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(result.stdout + result.stderr, /about:debugging#\/runtime\/this-firefox/u);
+    const manifestPath = join(await realpath(root), 'extension', 'manifest.json');
+    assert.ok(result.stdout.toLowerCase().includes(manifestPath.toLowerCase()), result.stdout);
+    for (const record of ['runtime-loaded.txt', 'npm-args.txt', 'setup-args.json', 'client-args.json', 'browser-open.json', 'sequence.txt']) {
+      await assert.rejects(readFile(join(root, record)), { code: 'ENOENT' });
+    }
+  }
 });
 
 test('installer aborts before setup if dependency installation fails', windowsOnly, async t => {
