@@ -168,3 +168,10 @@ Ohne Registrierung werden nur die erzeugten Dateien der aufgerufenen Projektkopi
 Wenn eine passende Node-Runtime und die Parserpakete in der aktuellen oder ursprünglichen Projektkopie verfügbar sind, entfernt das Skript zusätzlich eindeutig zu dieser Installation gehörende, unveränderte Firefox-MCP-Einträge der erkannten KI-Clients. Fremde und nachträglich geänderte Einträge bleiben erhalten. Fehlen Runtime oder Pakete nach dem Löschen des ursprünglichen Ordners, wird die Native-Host-Deinstallation trotzdem abgeschlossen; der Installer weist auf manuell zu entfernende Client-Einträge hin. Dafür wird nichts heruntergeladen. `-WhatIf` verändert auch die Client-Konfigurationen nicht.
 
 Das Firefox-Add-on unter `about:addons` separat entfernen. Eventuell übersprungene Client-Einträge anhand der obigen Tabelle prüfen und die betroffenen KI-Apps neu starten. Sicherungskopien werden nicht automatisch zurückgespielt, da dies spätere Änderungen anderer Einstellungen verlieren könnte. Anschließend kann der Projektordner bei Bedarf entfernt werden.
+
+## TODO / MAYBE
+
+Die Bereitstellung bleibt vorerst bei GitHub. Ein Upload zu Mozilla beziehungsweise eine Veröffentlichung im Add-on-Katalog ist derzeit nicht vorgesehen.
+
+- [ ] Optional eine von Mozilla signierte XPI für die dauerhafte Add-on-Installation anbieten, öffentlich gelistet oder zur eigenen Verteilung. Bis zu einer ausdrücklichen Entscheidung bleibt dies eine Idee.
+- [ ] Optional eine geführte Einrichtung der KI-Apps im Add-on anbieten. Die Registrierung würde der separat installierte lokale Helfer ausführen; die erstmalige Installation dieses Helfers bleibt erforderlich.
