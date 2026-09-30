@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Firefox ↔ Codex</title>
+    <link rel="stylesheet" href="popup.css">
+    <script src="popup.js" defer></script>
+  </head>
+  <body>
+    <header><img src="icon.svg" width="36" height="36" alt=""><div><h1>Firefox ↔ Codex</h1><p>Lokale MCP-Verbindung</p></div></header>
+    <section aria-live="polite"><div class="status"><span id="dot" class="dot"></span><strong id="status">Verbindung wird geprüft …</strong></div><p id="detail">Fenster, Tabs und native Firefox-Tabgruppen.</p><p id="lastAccess">Noch kein MCP-Zugriff.</p></section>
+    <p id="error" class="error" hidden></p>
+    <div class="actions"><button id="toggle" type="button">MCP deaktivieren</button><button id="reconnect" class="secondary" type="button">Neu verbinden</button></div>
+    <label for="contentMode">Seiteninhalte auslesen</label>
+    <select id="contentMode"><option value="deny">Nicht erlauben</option><option value="allow">Erlauben</option><option value="ask-every-time">Jedes Mal fragen</option><option value="ask-session">Für eine Sitzung fragen (12 Stunden)</option></select>
+    <label for="contentScope">Geltungsbereich für Seiteninhalte</label>
+    <select id="contentScope"><option value="active">Nur aktiver Tab im zuletzt aktiven Fenster</option><option value="all">Alle Tabs</option></select>
+    <p id="session" class="note"></p>
+    <p class="note">Standard: Sitzungsfreigabe, nur aktiver Tab. Eine Freigabe endet nach 12 Stunden oder beim Firefox-Neustart. Änderungen widerrufen sie. Entladene Tabs werden beim Lesen nicht aufgeweckt.</p>
+    <p class="legend"><span class="key blue"></span>≤ 1 Min. <span class="key amber"></span>≤ 30 Min. <span class="key green"></span>verbunden, inaktiv <span class="key gray"></span>aus/getrennt</p>
+    <footer>Native Host: <code>de.codex.firefox_bridge</code><br>Version <span id="version">0.1.0</span></footer>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "manifest_version": 2,
+  "name": "Firefox ↔ Codex MCP",
+  "version": "0.1.0",
+  "description": "Lokale MCP-Verbindung für Fenster, Tabs, native Tabgruppen und Seiteninhalte.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "firefox-codex-mcp@local.invalid",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["browsingActivity", "websiteContent"],
+        "optional": ["technicalAndInteraction"]
+      }
+    }
+  },
+  "permissions": ["tabs", "tabGroups", "sessions", "storage", "nativeMessaging", "http://*/*", "https://*/*"],
+  "background": {"scripts": ["policy.js", "core.js", "background.js"], "persistent": true},
+  "browser_action": {
+    "default_title": "Firefox ↔ Codex MCP",
+    "default_popup": "popup.html",
+    "default_icon": "icon.svg"
+  },
+  "icons": {"48": "icon.svg", "96": "icon.svg"},
+  "content_security_policy": "script-src 'self'; object-src 'none'"
+}
