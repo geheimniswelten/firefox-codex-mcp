@@ -1,3 +1,14 @@
+### Kurz
+
+- Firefox mit KI verwalten (Tabs/Fenster/Plugins suchen/durchsuchen/schließen/verschieben/...)
+   - Codex, Claude Code (CLI / VS Code), Claude Desktop, Eigent, Gemini CLI / Code Assist, Gemini Desktop, Hermes, LM Studio and OpenClaw
+- **ACHTUNG:** derzeit im Testmodus, nur als temporäres Add-on
+- Downloaden und install.cmd ausführen
+   - in about:debugging#/runtime/this-firefox "Temporäres Add-on laden" -> ...\firefox-codex-mcp\extension\manifest.json
+   - als FF-Plugin, online, zum Direktinstallieren, aktuell noch nicht (aus Firefox heraus ist eine Registrierung bei den KI-Agenten sowieso nicht möglich)
+- Windows + Firefox _(FF im OSX und Linux prinzipiell möglich, also Plugin inkl. MCP-Server, aber erstellen und registrieren aktuell manuell)_
+- Zugriff auf Seiteninhalte standardmäßig gesperrt (bei Erstzugriff wird nach Freigabe gefragt)
+
 # Firefox ↔ Codex MCP
 
 Firefox-Erweiterung und lokaler MCP-Server für die vorhandenen Firefox-Fenster, Tabs, nativen Tabgruppen, installierten Erweiterungen und Seiteninhalte. Die Verbindung nutzt Firefox Native Messaging, einen ausschließlich an `127.0.0.1` gebundenen Host mit Zugriffstoken und MCP über Standard-Ein-/Ausgabe. Es ist kein OpenAI-API-Schlüssel nötig.
