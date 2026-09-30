@@ -2,7 +2,7 @@
 
 ## Automatisierte Tests
 
-`node --test test/*.test.mjs`: **84 bestanden, 0 fehlgeschlagen**.
+`node --test test/*.test.mjs`: **86 bestanden, 0 fehlgeschlagen**.
 
 Abgedeckt sind Firefox-Zustände und Metadaten, native Gruppen mit großen IDs, Inhaltsbegrenzung, die vier Inhaltsregeln, aktiver Tab, Navigation während der Freigabe, feste zwölfstündige Sitzungsfreigaben, Widerruf und Abbruch laufender Stapel. Die Zeitgrenzen werden mit einer kontrollierten Uhr geprüft, ohne zwölf Stunden zu warten. Hinzu kommen die Erweiterungsliste mit Statusfiltern und Pagination sowie Anfordern, Ablehnen, Widerrufen und externe Änderungen der optionalen Datenfreigabe im Symbolleistenmenü.
 
@@ -10,7 +10,9 @@ Zusätzlich geprüft: echte MCP-SDK-Verbindungen über Standard-Ein-/Ausgabe mit
 
 ## Windows-Installationsmenü
 
-Die Zuordnung der CHOICE-Auswahl und die Weitergabe von Fehlercodes werden geprüft. `install.ps1` wurde mit tatsächlichem Windows PowerShell **5.1** und Node aus einem Testpfad mit Leerzeichen und Apostroph ausgeführt: Registrierung anfordern, `-GenerateOnly` mit Port und Abbruch bei fehlgeschlagener Paketinstallation. Nur npm und die anschließende Registrierung wurden dabei durch protokollierende Testskripte ersetzt; es wurde nichts installiert.
+Die Zuordnung der CHOICE-Auswahl und die Weitergabe von Fehlercodes werden geprüft. `install.ps1` wurde mit tatsächlichem Windows PowerShell **5.1** und Node aus einem Testpfad mit Leerzeichen und Apostroph ausgeführt: Registrierung anfordern, `-GenerateOnly` mit Port und Abbruch bei fehlgeschlagener Paketinstallation. npm und die anschließende Registrierung wurden dabei durch protokollierende Testskripte ersetzt; es wurde nichts installiert.
+
+Der Firefox-Aufruf nach erfolgreicher Installation wird mit aufgezeichneten Startargumenten geprüft. Bei `-GenerateOnly`, `-NoOpenFirefox` und fehlgeschlagener Installation erfolgt kein Aufruf. Fehlendes Firefox und Startfehler lassen die abgeschlossene Installation erfolgreich und zeigen Adresse und vollständigen Manifestpfad zur manuellen Einrichtung. Browsererkennung und Prozessstart sind in diesen Tests ersetzt; dabei wird kein echtes Browserfenster geöffnet.
 
 Echte `cmd.exe`-Tests mit harmlosen PowerShell-Testskripten prüfen alle drei Menüaktionen, fehlendes PowerShell, Fehlercodes und die Abschlussanzeige. Die gemeldete Ursache des sofortigen Schließens ist reproduziert: Ein Enter nach der Menüziffer wurde vom späteren `pause` verbraucht. Der neue Abschluss mit `CHOICE /C 0` bleibt trotz dieses Enter offen. Pfade mit Leerzeichen, Apostroph und Ausrufezeichen sowie aktivierte verzögerte CMD-Expansion sind abgedeckt.
 
