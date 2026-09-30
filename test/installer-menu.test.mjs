@@ -53,20 +53,6 @@ async function runHarness(root, body, { mocks = true } = {}) {
   return execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', harness], { cwd: root, env: cleanEnv, encoding: 'utf8', timeout: 20_000, windowsHide: true });
 }
 
-test('CMD menu routes choices in descending errorlevel order and preserves operation exit codes', async () => {
-  const cmd = await readFile(join(project, 'install.cmd'), 'utf8');
-  assert.match(cmd, /choice \/C 1230 \/N \/M/i);
-  const branches = [...cmd.matchAll(/if errorlevel (\d+) goto (\w+)/gi)].map(match => [Number(match[1]), match[2]]);
-  assert.deepEqual(branches, [[255, 'choice_error'], [4, 'cancelled'], [3, 'uninstall'], [2, 'generate'], [1, 'install']]);
-  assert.match(cmd, /:install\r?\npowershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\.ps1"\r?\nset "operationExit=%errorlevel%"/);
-  assert.match(cmd, /:generate\r?\npowershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\.ps1" -GenerateOnly/);
-  assert.match(cmd, /:uninstall\r?\npowershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall\.ps1"/);
-  assert.match(cmd, /setlocal[\s\S]*set "PSModulePath="/i);
-  assert.match(cmd, /setlocal DisableDelayedExpansion/i);
-  assert.match(cmd, /pause\r?\nexit \/b %operationExit%/);
-  assert.doesNotMatch(cmd, /Set-ExecutionPolicy|taskkill|rd \/s|rmdir \/s/i);
-});
-
 test('uninstall PowerShell syntax is valid in Windows PowerShell 5.1', { skip: !windows }, () => {
   const script = `$tokens = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile(${psQuote(join(project, 'uninstall.ps1'))}, [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { throw ($errors | Out-String) }; 'Syntax OK'`;
   const result = execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], { env: cleanEnv, encoding: 'utf8', windowsHide: true });

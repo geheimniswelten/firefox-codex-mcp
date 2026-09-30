@@ -2,7 +2,7 @@
 
 ## Automatisierte Tests
 
-`node --test test/*.test.mjs`: **77 bestanden, 0 fehlgeschlagen**.
+`node --test test/*.test.mjs`: **84 bestanden, 0 fehlgeschlagen**.
 
 Abgedeckt sind Firefox-Zustände und Metadaten, native Gruppen mit großen IDs, Inhaltsbegrenzung, die vier Inhaltsregeln, aktiver Tab, Navigation während der Freigabe, feste zwölfstündige Sitzungsfreigaben, Widerruf und Abbruch laufender Stapel. Die Zeitgrenzen werden mit einer kontrollierten Uhr geprüft, ohne zwölf Stunden zu warten. Hinzu kommen die Erweiterungsliste mit Statusfiltern und Pagination sowie Anfordern, Ablehnen, Widerrufen und externe Änderungen der optionalen Datenfreigabe im Symbolleistenmenü.
 
@@ -11,6 +11,12 @@ Zusätzlich geprüft: echte MCP-SDK-Verbindungen über Standard-Ein-/Ausgabe mit
 ## Windows-Installationsmenü
 
 Die Zuordnung der CHOICE-Auswahl und die Weitergabe von Fehlercodes werden geprüft. `install.ps1` wurde mit tatsächlichem Windows PowerShell **5.1** und Node aus einem Testpfad mit Leerzeichen und Apostroph ausgeführt: Registrierung anfordern, `-GenerateOnly` mit Port und Abbruch bei fehlgeschlagener Paketinstallation. Nur npm und die anschließende Registrierung wurden dabei durch protokollierende Testskripte ersetzt; es wurde nichts installiert.
+
+Echte `cmd.exe`-Tests mit harmlosen PowerShell-Testskripten prüfen alle drei Menüaktionen, fehlendes PowerShell, Fehlercodes und die Abschlussanzeige. Die gemeldete Ursache des sofortigen Schließens ist reproduziert: Ein Enter nach der Menüziffer wurde vom späteren `pause` verbraucht. Der neue Abschluss mit `CHOICE /C 0` bleibt trotz dieses Enter offen. Pfade mit Leerzeichen, Apostroph und Ausrufezeichen sowie aktivierte verzögerte CMD-Expansion sind abgedeckt.
+
+Vier isolierte Runtime-Tests prüfen Wiederverwendung ohne globales Node/npm, offiziellen versionsgebundenen Download, SHA256-Abgleich, abgelehnte beschädigte Downloads, `-NoDownload` und den Erhalt unbekannter vorhandener Dateien. Netzwerk und Versionsproben werden dabei gezielt ersetzt.
+
+Zusätzlich wurde der tatsächliche Installer unter Windows PowerShell **5.1** mit dem normalen Windows-Pfad ohne vorhandenes Node/npm erfolgreich ausgeführt: Node **24.21.0** und npm **11.19.0** wurden nach Prüfung des offiziellen Downloads im Projekt eingerichtet, die 14 Laufzeitpakete installiert und der Firefox Native Host registriert. Die systemweite Node-Installation und der dauerhafte Windows-Pfad wurden nicht verändert. Der vollständige Testlauf verwendet anschließend diese Projekt-Runtime.
 
 Die Deinstallation wurde in getrennten Testverzeichnissen geprüft: eigene erzeugte Dateien entfernen, unbekannte Dateien erhalten, Wiederholung, `-WhatIf` und Ablehnen von Verknüpfungen. Registrierungszugriffe und Prozesslisten waren in diesen Tests ersetzt. Ein zusätzlich selbst gestarteter, harmloser Node-Testprozess wurde mit tatsächlicher Prozesszuordnung und dem auf Mikrosekunden angepassten Erstellungszeitvergleich beendet. Die echte Deinstallation im Benutzerprofil wurde nicht ausgeführt.
 
@@ -32,4 +38,4 @@ Die Testprofile waren vom normalen Firefox-Profil getrennt. Alle nur für die Te
 
 JavaScript-Syntax und Manifestkonsistenz wurden geprüft. Mozilla `web-ext lint` meldet **0 Fehler** und eine Android-Kompatibilitätswarnung: Die Datenfreigabe benötigt dort Firefox 142, während das Desktop-Minimum 140 ist. Dieses Projekt ist für **Desktop-Firefox** ausgelegt; Android wird nicht unterstützt.
 
-Die ZIP-Pakete enthalten weder lokale Tokens/Konfiguration noch `node_modules`. Die Erweiterung ist **unsigniert** und noch nicht im normalen Firefox-Profil oder in Codex registriert. Tests mit den verwendeten Versionen sind keine Zusage für alle zukünftigen Firefox-/Codex-Versionen.
+Die ZIP-Pakete enthalten weder lokale Tokens/Konfiguration noch `node_modules` oder `.runtime`. Die Erweiterung ist **unsigniert**. Das Laden des Firefox-Add-ons und der Eintrag beim KI-Agenten werden vom Installer weiterhin nicht automatisch vorgenommen. Tests mit den verwendeten Versionen sind keine Zusage für alle zukünftigen Firefox-/Codex-Versionen.

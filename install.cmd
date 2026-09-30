@@ -9,6 +9,7 @@ echo [2] Nur Erzeugen
 echo [3] Deinstallieren
 echo [0] Beenden
 echo.
+echo Ziffer ohne Eingabetaste druecken.
 choice /C 1230 /N /M "Auswahl [1/2/3/0]: "
 if errorlevel 255 goto choice_error
 if errorlevel 4 goto cancelled
@@ -47,5 +48,6 @@ if "%operationExit%"=="0" (
 ) else (
     echo Vorgang fehlgeschlagen. Fehlercode: %operationExit%
 )
-pause
+rem A queued Enter from the menu must not dismiss the operation result.
+choice /C 0 /N /M "Zum Schliessen 0 druecken: "
 exit /b %operationExit%

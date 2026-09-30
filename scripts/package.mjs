@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
-const excluded = new Set(['node_modules', '.local', 'dist', '.git', 'coverage']);
+const excluded = new Set(['node_modules', '.runtime', '.local', 'dist', '.git', 'coverage']);
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
   return value >>> 0;
@@ -79,7 +79,7 @@ try {
   const sourceFiles = await collect(root);
   if (!sourceFiles.some(file => file.name === 'package-lock.json')) throw new Error('Lockdatei fehlt.');
   await writeFile(join(dist, 'firefox-codex-mcp-source.zip'), zip(sourceFiles));
-  console.log(`Pakete erstellt in ${dist}\nErweiterung: ${extensionFiles.length} Dateien; Quellpaket: ${sourceFiles.length} Dateien.\nDie Erweiterung ist unsigniert; .local und node_modules sind ausgeschlossen.`);
+  console.log(`Pakete erstellt in ${dist}\nErweiterung: ${extensionFiles.length} Dateien; Quellpaket: ${sourceFiles.length} Dateien.\nDie Erweiterung ist unsigniert; .local, .runtime und node_modules sind ausgeschlossen.`);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;
