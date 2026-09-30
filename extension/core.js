@@ -1,7 +1,7 @@
 /* Shared as a plain background script and a side-effect module in Node tests. */
 (() => {
   "use strict";
-  const VERSION = "0.1.0";
+  const VERSION = "0.1.1";
   const SESSION_KEY = "firefox-codex-mcp.metadata.v1";
   const MAX_RESPONSE_BYTES = 800000; // Leave room for the native RPC envelope.
   const COLORS = ["blue", "cyan", "grey", "green", "orange", "pink", "purple", "red", "yellow"];
@@ -17,6 +17,7 @@
   const size = (value) => new TextEncoder().encode(JSON.stringify(value)).length;
   const METHODS = {
     status: [], get_current: [], list_windows: ["populate"],
+    list_extensions: ["enabled", "type", "limit", "offset"],
     list_tabs: ["windowId", "active", "audible", "muted", "discarded", "groupId", "limit", "offset"],
     get_tabs: ["tabIds"], create_tab: ["url", "windowId", "active", "pinned", "index"],
     update_tab: ["tabId", "url", "active", "pinned", "muted"], set_muted: ["tabIds", "muted"],
@@ -42,7 +43,7 @@
       const max = key === "groupId" ? Number.MAX_SAFE_INTEGER : 2147483647;
       if (!Number.isSafeInteger(p[key]) || p[key] < min || p[key] > max) fail(`${key} muss eine ganze Zahl zwischen ${min} und ${max} sein.`);
     }
-    for (const key of ["active", "audible", "muted", "discarded", "pinned", "bypassCache", "focused", "incognito", "populate", "collapsed", "includeLinks"]) {
+    for (const key of ["active", "audible", "muted", "discarded", "pinned", "bypassCache", "focused", "incognito", "populate", "collapsed", "includeLinks", "enabled"]) {
       if (own(p, key) && typeof p[key] !== "boolean") fail(`${key} muss boolean sein.`);
     }
     if (own(p, "tabIds")) {
@@ -60,6 +61,7 @@
     if (method === "create_window" && own(p, "url") && own(p, "tabId")) fail("url und tabId können nicht kombiniert werden.");
     if (method === "group_tabs" && own(p, "windowId") && own(p, "groupId")) fail("windowId gilt nur für neue Gruppen; für vorhandene Gruppen nur groupId angeben.");
     if (own(p, "state") && !["normal", "minimized", "maximized", "fullscreen"].includes(p.state)) fail("Ungültiger Fensterzustand.");
+    if (own(p, "type") && !["extension", "theme", "all"].includes(p.type)) fail("type muss extension, theme oder all sein.");
     if (own(p, "color") && !COLORS.includes(p.color)) fail("Ungültige Gruppenfarbe.");
     if (own(p, "title") && (typeof p.title !== "string" || p.title.length > 512)) fail("title darf höchstens 512 Zeichen enthalten.");
     if (own(p, "format") && !["text", "html"].includes(p.format)) fail("format muss text oder html sein.");
@@ -186,19 +188,20 @@
     }
     let output = result;
     if (size(output) <= MAX_RESPONSE_BYTES) return output;
-    // List tabs has a real pagination cursor; reduce the page before clipping data.
-    if (Array.isArray(output.tabs) && own(output, "offset")) {
-      output = { ...output, tabs: [...output.tabs], truncated: true, truncationReason: "packet-size" };
-      const candidates = output.tabs;
+    // Reduce paginated pages before clipping strings, keeping the cursor exact.
+    const listKey = Array.isArray(output.tabs) ? "tabs" : Array.isArray(output.extensions) ? "extensions" : null;
+    if (listKey && own(output, "offset")) {
+      output = { ...output, [listKey]: [...output[listKey]], truncated: true, truncationReason: "packet-size" };
+      const candidates = output[listKey];
       let low = 1, high = candidates.length;
       while (low < high) {
         const middle = Math.ceil((low + high) / 2);
-        if (size({ ...output, tabs: candidates.slice(0, middle) }) <= MAX_RESPONSE_BYTES - 1000) low = middle;
+        if (size({ ...output, [listKey]: candidates.slice(0, middle) }) <= MAX_RESPONSE_BYTES - 1000) low = middle;
         else high = middle - 1;
       }
-      output.tabs = candidates.slice(0, low);
-      output.returned = output.tabs.length;
-      output.nextOffset = output.offset + output.tabs.length < output.total ? output.offset + output.tabs.length : null;
+      output[listKey] = candidates.slice(0, low);
+      output.returned = output[listKey].length;
+      output.nextOffset = output.offset + output[listKey].length < output.total ? output.offset + output[listKey].length : null;
     }
     for (let max = 50000; size(output) > MAX_RESPONSE_BYTES && max >= 128; max = Math.floor(max / 2)) output = clip(output, max);
     if (truncatedStrings) output = { ...output, truncated: true, truncationReason: "packet-size", stringsTruncated: true };
@@ -229,6 +232,12 @@
       return { results, partialFailure: results.some(item => item.error) };
     };
     const groupFields = p => pick(p, ["title", "color", "collapsed"]);
+    const requireInventoryPermission = async () => {
+      const permissions = browser.permissions?.getAll ? await browser.permissions.getAll() : {};
+      if (!permissions.data_collection?.includes("technicalAndInteraction")) {
+        throw new BridgeError("INVENTORY_PERMISSION_REQUIRED", "Im Symbolleistenmenü zuerst ‚Erweiterungsliste und Browser-Version freigeben‘ aktivieren. Alternativ die optionalen technischen Daten unter about:addons freigeben.");
+      }
+    };
     async function handle(method, params = {}, context = {}) {
       validate(method, params); await ready;
       context.assertLive?.();
@@ -244,6 +253,21 @@
           return { window: await formatWindow({ ...window, tabs: undefined }), tab: window.tabs?.find(tab => tab.active) ? await tracker.format(window.tabs.find(tab => tab.active)) : null, semantics: "last-focused-normal-window", firefoxFocused: Boolean(window.focused) };
         }
         case "list_windows": return { windows: await Promise.all((await browser.windows.getAll({ populate: p.populate ?? false })).map(formatWindow)) };
+        case "list_extensions": {
+          await requireInventoryPermission();
+          context.assertLive?.();
+          if (typeof browser.management?.getAll !== "function") throw new BridgeError("MANAGEMENT_UNAVAILABLE", "Die Erweiterungsverwaltung ist nicht verfügbar. Aktualisierte Erweiterung mit management-Berechtigung neu laden.");
+          const type = p.type ?? "extension";
+          const addons = (await browser.management.getAll())
+            .filter(addon => ["extension", "theme"].includes(addon.type) && (type === "all" || addon.type === type) && (!own(p, "enabled") || addon.enabled === p.enabled))
+            .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+          // Permission revocation must also stop an in-flight inventory response.
+          await requireInventoryPermission();
+          context.assertLive?.();
+          const offset = p.offset ?? 0, limit = p.limit ?? 100;
+          const extensions = addons.slice(offset, offset + limit).map(addon => pick(addon, ["id", "name", "version", "type", "enabled", "description", "installType", "disabledReason"]));
+          return { extensions, total: addons.length, offset, limit, returned: extensions.length, nextOffset: offset + extensions.length < addons.length ? offset + extensions.length : null };
+        }
         case "list_tabs": {
           const tabs = await browser.tabs.query(pick(p, ["windowId", "active", "audible", "muted", "discarded", "groupId"]));
           tabs.sort((a, b) => a.windowId - b.windowId || a.index - b.index);

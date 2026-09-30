@@ -1,7 +1,44 @@
 /* global browser */
 "use strict";
 let settings = null, updating = false;
+let permissionsUpdating = false, permissionGranted = false, permissionRefreshId = 0;
 const el = id => document.getElementById(id);
+const inventoryPermission = { data_collection: ["technicalAndInteraction"] };
+async function refreshPermissions() {
+  if (permissionsUpdating) return;
+  const requestId = ++permissionRefreshId;
+  try {
+    const permissions = await browser.permissions.getAll();
+    if (permissionsUpdating || requestId !== permissionRefreshId) return;
+    permissionGranted = permissions.data_collection?.includes("technicalAndInteraction") === true;
+    el("inventoryPermission").checked = permissionGranted;
+    el("inventoryPermission").disabled = false;
+  } catch (error) {
+    if (requestId !== permissionRefreshId || permissionsUpdating) return;
+    el("inventoryError").hidden = false;
+    el("inventoryError").textContent = String(error.message || error);
+  }
+}
+async function changeInventoryPermission() {
+  if (permissionsUpdating) { el("inventoryPermission").checked = permissionGranted; return; }
+  const wanted = el("inventoryPermission").checked;
+  permissionsUpdating = true; permissionRefreshId += 1;
+  el("inventoryPermission").disabled = true;
+  el("inventoryError").hidden = true;
+  try {
+    // Invoke directly in the click handler, before its first await. Firefox
+    // requires a user gesture to request optional data-collection consent.
+    await (wanted ? browser.permissions.request(inventoryPermission) : browser.permissions.remove(inventoryPermission));
+  } catch (error) {
+    el("inventoryError").hidden = false;
+    el("inventoryError").textContent = String(error.message || error);
+  } finally {
+    el("inventoryPermission").checked = permissionGranted;
+    permissionsUpdating = false;
+    await refreshPermissions();
+    el("inventoryPermission").disabled = false;
+  }
+}
 function render(state) {
   if (updating) return;
   settings = state.settings;
@@ -36,6 +73,14 @@ el("toggle").addEventListener("click", () => save({ enabled: !settings.enabled }
 el("contentMode").addEventListener("change", event => save({ contentMode: event.target.value }));
 el("contentScope").addEventListener("change", event => save({ contentScope: event.target.value }));
 el("reconnect").addEventListener("click", () => request({ type: "bridge_reconnect" }));
+el("inventoryPermission").addEventListener("click", changeInventoryPermission);
+browser.permissions.onAdded.addListener(refreshPermissions);
+browser.permissions.onRemoved.addListener(refreshPermissions);
 request({ type: "bridge_status" });
-const refresh = setInterval(() => request({ type: "bridge_status" }), 1500);
-window.addEventListener("unload", () => clearInterval(refresh));
+refreshPermissions();
+const refresh = setInterval(() => { request({ type: "bridge_status" }); refreshPermissions(); }, 1500);
+window.addEventListener("unload", () => {
+  clearInterval(refresh);
+  browser.permissions.onAdded.removeListener(refreshPermissions);
+  browser.permissions.onRemoved.removeListener(refreshPermissions);
+});

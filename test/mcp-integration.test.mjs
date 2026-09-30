@@ -50,7 +50,7 @@ test('real SDK stdio exposes all tools, forwards calls and rejects invalid schem
   t.after(() => new Promise(resolve => server.close(resolve)));
   const client = await connect(t, server.address().port);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 21);
+  assert.equal(tools.length, 22);
   assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.ok(client.getInstructions().includes('untrusted'));
   assert.equal(tools.find(tool => tool.name === 'firefox_close_tabs').annotations.destructiveHint, true);
@@ -81,7 +81,7 @@ test('tool discovery works offline and a call gives an actionable isError respon
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const client = await connect(t, port);
-  assert.equal((await client.listTools()).tools.length, 21);
+  assert.equal((await client.listTools()).tools.length, 22);
   const response = await client.callTool({ name: 'firefox_status', arguments: {} });
   assert.equal(response.isError, true);
   assert.equal(response.structuredContent.error.code, 'FIREFOX_OFFLINE');
@@ -95,9 +95,45 @@ test('stdio supports modern protocol discovery as well as legacy initialization'
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
   const client = await connect(t, server.address().port, 'auto');
-  assert.equal((await client.listTools()).tools.length, 21);
+  assert.equal((await client.listTools()).tools.length, 22);
   const response = await client.callTool({ name: 'firefox_status', arguments: {} });
   assert.deepEqual(response.structuredContent, { result: { connected: true } });
+});
+
+test('extension inventory forwards filters and surfaces consent requirements without retries', async t => {
+  const requests = [];
+  let permitted = true;
+  const inventory = { extensions: [{ id: 'sample@example.invalid', name: 'Sample extension', version: '1.2.3', type: 'extension', enabled: false, disabledReason: 'permissions_increase' }], total: 4, offset: 3, limit: 2, returned: 1, nextOffset: null };
+  const server = http.createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    requests.push(JSON.parse(body));
+    res.end(JSON.stringify(permitted ? { result: inventory } : { error: { code: 'INVENTORY_PERMISSION_REQUIRED', message: 'Allow technicalAndInteraction data in the Firefox toolbar before listing installed extensions.' } }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const client = await connect(t, server.address().port);
+  const name = 'firefox_list_extensions';
+  const tool = (await client.listTools()).tools.find(tool => tool.name === name);
+  assert.deepEqual(tool.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+  const args = { enabled: false, type: 'all', limit: 2, offset: 3 };
+  const response = await client.callTool({ name, arguments: args });
+  assert.deepEqual(response.structuredContent, { result: inventory });
+  assert.deepEqual(requests[0], { method: 'list_extensions', params: args });
+  await client.callTool({ name, arguments: {} });
+  assert.deepEqual(requests[1], { method: 'list_extensions', params: {} });
+  for (const args of [{ type: 'plugin' }, { enabled: 'false' }, { limit: 501 }, { offset: -1 }, { unknown: true }]) {
+    const invalid = await client.callTool({ name, arguments: args });
+    assert.equal(invalid.isError, true);
+  }
+  assert.equal(requests.length, 2);
+  permitted = false;
+  const denied = await client.callTool({ name, arguments: {} });
+  assert.equal(denied.isError, true);
+  assert.equal(denied.structuredContent.error.code, 'INVENTORY_PERMISSION_REQUIRED');
+  assert.match(denied.structuredContent.error.message, /Firefox toolbar/);
+  assert.equal(requests.length, 3);
 });
 
 for (const mode of ['legacy', 'auto']) {

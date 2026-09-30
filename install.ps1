@@ -12,7 +12,7 @@ if (-not $nodeCommand) { throw 'Node.js 22 oder neuer wird benötigt. Node insta
 $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
 if (-not $npmCommand) { $npmCommand = Get-Command npm -ErrorAction SilentlyContinue }
 if (-not $npmCommand) { throw 'npm wurde nicht gefunden. Bitte die Node.js-Installation prüfen.' }
-$major = & $nodeCommand.Source -p 'Number(process.versions.node.split(".")[0])'
+$major = & $nodeCommand.Source -p 'parseInt(process.versions.node)'
 if ($LASTEXITCODE -ne 0 -or [int]$major -lt 22) { throw 'Node.js 22 oder neuer wird benötigt.' }
 
 Push-Location -LiteralPath $projectRoot

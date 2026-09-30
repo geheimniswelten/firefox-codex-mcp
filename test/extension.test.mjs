@@ -8,6 +8,62 @@ import '../extension/policy.js';
 const { createService, SESSION_KEY, boundResponse, validate } = globalThis.FirefoxBridgeCore;
 const { ContentAccess, iconStatus, SESSION_MS } = globalThis.FirefoxBridgePolicy;
 const clone = value => structuredClone(value);
+
+test('extension inventory includes disabled add-ons, filters supported types and paginates without mutating them', async () => {
+  const browser = mockBrowser();
+  const installed = [
+    { id: 'disabled@test', name: 'Alpha', version: '2.3', type: 'extension', enabled: false, disabledReason: 'permissions_increase', permissions: ['tabs'] },
+    { id: 'active@test', name: 'Beta', version: '1.0', type: 'extension', enabled: true, installType: 'normal', homepageUrl: 'https://example.org/' },
+    { id: 'theme@test', name: 'A Theme', version: '3', type: 'theme', enabled: false },
+    { id: 'other@test', name: 'Other', version: '1', type: 'hosted_app', enabled: true }
+  ];
+  browser.permissions = { getAll: async () => ({ data_collection: ['technicalAndInteraction'] }) };
+  browser.management = { getAll: async () => clone(installed), setEnabled: () => assert.fail('Inventory must be read-only') };
+  const service = createService(browser);
+  const allExtensions = await service.handle('list_extensions');
+  assert.deepEqual(allExtensions.extensions.map(addon => addon.id), ['disabled@test', 'active@test']);
+  assert.equal(allExtensions.extensions[0].enabled, false);
+  assert.equal(allExtensions.extensions[0].disabledReason, 'permissions_increase');
+  assert.equal(allExtensions.extensions[1].installType, 'normal');
+  assert.equal('permissions' in allExtensions.extensions[0], false);
+  assert.equal('homepageUrl' in allExtensions.extensions[1], false);
+  assert.equal(allExtensions.total, 2);
+  assert.equal(allExtensions.nextOffset, null);
+  assert.deepEqual((await service.handle('list_extensions', { enabled: true })).extensions.map(addon => addon.id), ['active@test']);
+  assert.deepEqual((await service.handle('list_extensions', { enabled: false })).extensions.map(addon => addon.id), ['disabled@test']);
+  assert.deepEqual((await service.handle('list_extensions', { type: 'theme' })).extensions.map(addon => addon.id), ['theme@test']);
+  const page = await service.handle('list_extensions', { type: 'all', limit: 1, offset: 1 });
+  assert.equal(page.total, 3); assert.equal(page.returned, 1); assert.equal(page.nextOffset, 2);
+  assert.equal((await service.handle('list_extensions', { offset: 99 })).returned, 0);
+  assert.equal((await service.handle('list_extensions', { offset: 99 })).nextOffset, null);
+  for (const args of [{ enabled: 'true' }, { type: 'plugin' }, { limit: 0 }, { limit: 501 }, { offset: -1 }, { unexpected: true }]) {
+    await assert.rejects(service.handle('list_extensions', args), error => error.code === 'INVALID_PARAMS');
+  }
+});
+
+test('inventory requires optional data consent before reading and refuses data when consent is revoked while reading', async () => {
+  const browser = mockBrowser();
+  let allowed = false, reads = 0;
+  browser.permissions = { getAll: async () => ({ data_collection: allowed ? ['technicalAndInteraction'] : [] }) };
+  browser.management = { getAll: async () => { reads++; allowed = false; return [{ id: 'test', name: 'Test', type: 'extension', enabled: true }]; } };
+  const service = createService(browser);
+  await assert.rejects(service.handle('list_extensions'), error => error.code === 'INVENTORY_PERMISSION_REQUIRED');
+  assert.equal(reads, 0);
+  allowed = true;
+  await assert.rejects(service.handle('list_extensions'), error => error.code === 'INVENTORY_PERMISSION_REQUIRED');
+  assert.equal(reads, 1);
+  allowed = true; delete browser.management;
+  await assert.rejects(service.handle('list_extensions'), error => error.code === 'MANAGEMENT_UNAVAILABLE');
+});
+
+test('oversized inventory pages preserve pagination when the native packet cap reduces a page', () => {
+  const result = boundResponse({ extensions: Array.from({ length: 100 }, (_, i) => ({ id: `addon-${i}`, description: 'x'.repeat(10000), enabled: false })), offset: 10, limit: 100, total: 150, returned: 100, nextOffset: 110 });
+  assert.equal(result.truncated, true);
+  assert.ok(result.extensions.length > 0 && result.extensions.length < 100);
+  assert.equal(result.nextOffset, 10 + result.extensions.length);
+  assert.equal(result.returned, result.extensions.length);
+  assert.ok(Buffer.byteLength(JSON.stringify(result)) < 800000);
+});
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
 function event() {
   const listeners = new Set();

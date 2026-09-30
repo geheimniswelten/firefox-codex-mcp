@@ -18,7 +18,10 @@
     <select id="contentScope"><option value="active">Nur aktiver Tab im zuletzt aktiven Fenster</option><option value="all">Alle Tabs</option></select>
     <p id="session" class="note"></p>
     <p class="note">Standard: Sitzungsfreigabe, nur aktiver Tab. Eine Freigabe endet nach 12 Stunden oder beim Firefox-Neustart. Änderungen widerrufen sie. Entladene Tabs werden beim Lesen nicht aufgeweckt.</p>
+    <label class="permission-option" for="inventoryPermission"><input id="inventoryPermission" type="checkbox" disabled><span>Erweiterungsliste und Browser-Version freigeben</span></label>
+    <p class="note permission-note">Erlaubt Codex, installierte Erweiterungen und ihren Aktivierungsstatus abzurufen.</p>
+    <p id="inventoryError" class="error" hidden></p>
     <p class="legend"><span class="key blue"></span>≤ 1 Min. <span class="key amber"></span>≤ 30 Min. <span class="key green"></span>verbunden, inaktiv <span class="key gray"></span>aus/getrennt</p>
-    <footer>Native Host: <code>de.codex.firefox_bridge</code><br>Version <span id="version">0.1.0</span></footer>
+    <footer>Native Host: <code>de.codex.firefox_bridge</code><br>Version <span id="version">0.1.1</span></footer>
   </body>
 </html>

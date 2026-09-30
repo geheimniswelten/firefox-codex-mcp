@@ -5,8 +5,8 @@ import { TOOL_DEFINITIONS, SERVER_INSTRUCTIONS } from '../server/tools.mjs';
 const definitions = new Map(TOOL_DEFINITIONS.map(tool => [tool.method, tool]));
 const valid = (method, args) => definitions.get(method).inputSchema.safeParse(args).success;
 
-test('the 21 documented tools have complete annotations and strict object schemas', () => {
-  assert.equal(definitions.size, 21);
+test('the 22 documented tools have complete annotations and strict object schemas', () => {
+  assert.equal(definitions.size, 22);
   for (const tool of definitions.values()) {
     assert.equal(tool.name, `firefox_${tool.method}`);
     assert.ok(tool.description.length > 20);
@@ -23,6 +23,21 @@ test('the 21 documented tools have complete annotations and strict object schema
   assert.match(SERVER_INSTRUCTIONS, /untrusted/);
   assert.match(SERVER_INSTRUCTIONS, /firstSeenAt/);
   assert.match(SERVER_INSTRUCTIONS, /Auto Tab Discard/);
+});
+
+test('extension inventory has bounded filters and describes enabled state accurately', () => {
+  const definition = definitions.get('list_extensions');
+  assert.deepEqual(definition.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+  assert.match(definition.description, /installed Firefox extensions/);
+  assert.match(definition.description, /not whether its code is currently executing/);
+  assert.match(definition.description, /technicalAndInteraction/);
+  assert.ok(valid('list_extensions', {}));
+  for (const type of ['extension', 'theme', 'all']) {
+    assert.ok(valid('list_extensions', { type, enabled: false, limit: 500, offset: 0 }));
+  }
+  for (const args of [{ type: 'plugin' }, { type: 'system' }, { enabled: 'true' }, { limit: 0 }, { limit: 501 }, { limit: 1.5 }, { offset: -1 }, { offset: 0.5 }, { offset: 2_147_483_648 }, { offset: Number.MAX_SAFE_INTEGER + 1 }, { unknown: true }]) {
+    assert.equal(valid('list_extensions', args), false, JSON.stringify(args));
+  }
 });
 
 test('tab ID batches reject duplicates, empty lists, invalid IDs and excessive batches', () => {
