@@ -1,0 +1,36 @@
+{
+	"name": "single-file-core",
+	"version": "1.6.19",
+	"description": "SingleFile Core",
+	"author": "Gildas Lormeau",
+	"license": "AGPL-3.0-or-later",
+	"files": [
+		"*.js",
+		"core/",
+		"modules/",
+		"processors/",
+		"vendor/",
+		"test/fixtures/*.html",
+		"test/fixtures/README.md"
+	],
+	"scripts": {
+		"test": "deno run --allow-read --allow-run test/run.js",
+		"bump-patch": "npm version patch --no-git-tag-version && npm run bump-commit",
+		"bump-minor": "npm version minor --no-git-tag-version && npm run bump-commit",
+		"bump-major": "npm version major --no-git-tag-version && npm run bump-commit",
+		"bump-commit": "git commit -m \"bump up version\" package.json package-lock.json"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/gildas-lormeau/single-file-core.git"
+	},
+	"bugs": {
+		"url": "https://github.com/gildas-lormeau/single-file-core/issues"
+	},
+	"homepage": "https://github.com/gildas-lormeau/single-file-core#readme",
+	"devDependencies": {
+		"@eslint/js": "^9.39.5",
+		"eslint": "^10.9.1",
+		"happy-dom": "^20.14.5"
+	}
+}

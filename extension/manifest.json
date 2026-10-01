@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Firefox ↔ Codex MCP",
-  "version": "0.1.2",
-  "description": "Lokale MCP-Verbindung für Fenster, Tabs, native Tabgruppen, installierte Erweiterungen und Seiteninhalte.",
+  "version": "0.1.3",
+  "description": "Lokale MCP-Verbindung für Fenster, Tabs, native Tabgruppen, Seiteninhalte sowie PNG-, HTML- und PDF-Export.",
   "browser_specific_settings": {
     "gecko": {
       "id": "firefox-codex-mcp@local.invalid",
@@ -13,8 +13,8 @@
       }
     }
   },
-  "permissions": ["tabs", "tabGroups", "sessions", "storage", "nativeMessaging", "management", "http://*/*", "https://*/*"],
-  "background": {"scripts": ["policy.js", "core.js", "background.js"], "persistent": true},
+  "permissions": ["tabs", "tabGroups", "sessions", "storage", "nativeMessaging", "management", "<all_urls>"],
+  "background": {"scripts": ["policy.js", "export-transfers.js", "png-export.js", "html-export.js", "pdf-export.js", "core.js", "background.js"], "persistent": true},
   "browser_action": {
     "default_title": "Firefox ↔ Codex MCP",
     "default_popup": "popup.html",

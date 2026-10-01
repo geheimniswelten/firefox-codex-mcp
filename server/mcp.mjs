@@ -5,14 +5,18 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { BridgeError, createBridgeClient } from './bridge-client.mjs';
 import { loadConfig, configPathFromArgs } from './config.mjs';
 import { SERVER_INSTRUCTIONS, TOOL_DEFINITIONS } from './tools.mjs';
+import { saveExport } from './exports.mjs';
 
 export function createFirefoxServer({ bridge }) {
-  const server = new McpServer({ name: 'firefox-codex-mcp', version: '0.1.2' }, { instructions: SERVER_INSTRUCTIONS });
+  const server = new McpServer({ name: 'firefox-codex-mcp', version: '0.1.3' }, { instructions: SERVER_INSTRUCTIONS });
   for (const definition of TOOL_DEFINITIONS) {
     const { method, name, ...configuration } = definition;
     server.registerTool(name, configuration, async (params, context) => {
       try {
-        const result = await bridge.call(method, params, { signal: context?.mcpReq?.signal });
+        const options = { signal: context?.mcpReq?.signal };
+        const result = method === 'save_png' || method === 'save_html'
+          ? await saveExport(bridge, method, params, options)
+          : await bridge.call(method, params, options);
         return {
           content: [{ type: 'text', text: JSON.stringify(result) }],
           structuredContent: { result },

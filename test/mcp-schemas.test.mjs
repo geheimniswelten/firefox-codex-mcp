@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOL_DEFINITIONS, SERVER_INSTRUCTIONS } from '../server/tools.mjs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const definitions = new Map(TOOL_DEFINITIONS.map(tool => [tool.method, tool]));
 const valid = (method, args) => definitions.get(method).inputSchema.safeParse(args).success;
 
-test('the 22 documented tools have complete annotations and strict object schemas', () => {
-  assert.equal(definitions.size, 22);
+test('the 25 documented tools have complete annotations and strict object schemas', () => {
+  assert.equal(definitions.size, 25);
   for (const tool of definitions.values()) {
     assert.equal(tool.name, `firefox_${tool.method}`);
     assert.ok(tool.description.length > 20);
@@ -23,6 +25,24 @@ test('the 22 documented tools have complete annotations and strict object schema
   assert.match(SERVER_INSTRUCTIONS, /untrusted/);
   assert.match(SERVER_INSTRUCTIONS, /firstSeenAt/);
   assert.match(SERVER_INSTRUCTIONS, /Auto Tab Discard/);
+});
+
+test('exports require caller-owned absolute destinations and expose no internal transfer tools', () => {
+  const png = join(tmpdir(), 'page.png');
+  const html = join(tmpdir(), 'page.html');
+  assert.ok(valid('save_png', { tabId: 1, path: png }));
+  assert.ok(valid('save_png', { tabId: 1, path: png, fullPage: false, loadDeferred: false, maxHeight: 100000 }));
+  assert.ok(valid('save_html', { tabId: 1, path: html, loadDeferred: false }));
+  assert.ok(valid('save_pdf', { tabId: 1 }));
+  for (const method of ['save_png', 'save_html', 'save_pdf']) {
+    assert.deepEqual(definitions.get(method).annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
+  }
+  for (const path of ['relative.png', 'C:relative.png', png.replace('page.png', '../page.png'), `${png}.txt`, png + '\u0000']) assert.equal(valid('save_png', { tabId: 1, path }), false, path);
+  for (const args of [{ maxHeight: 0 }, { maxHeight: 100001 }, { maxHeight: 1.2 }, { fullPage: 'yes' }, { loadDeferred: 'yes' }]) assert.equal(valid('save_png', { tabId: 1, path: png, ...args }), false);
+  assert.equal(valid('save_html', { tabId: 1, path: png }), false);
+  assert.equal(valid('save_pdf', { tabId: 1, path: join(tmpdir(), 'page.pdf') }), false);
+  assert.equal(definitions.has('export_chunk'), false);
+  assert.equal(definitions.has('export_release'), false);
 });
 
 test('extension inventory has bounded filters and describes enabled state accurately', () => {

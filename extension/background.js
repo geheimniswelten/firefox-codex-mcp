@@ -62,6 +62,7 @@
     retryDelay = Math.min(retryDelay * 2, 30000);
   }
   function disconnect() {
+    service.clearExports?.();
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = null; finishPrompt(false);
     const oldPort = port; port = null;
@@ -94,7 +95,7 @@
       } catch (error) { send(target, { id: message.id, error: errorData(error) }); }
     };
     // Permission prompts do not hold status or tab-control requests in the queue.
-    if (message.method === "read_content") execute().finally(() => { pendingCount -= 1; });
+    if (["read_content", "save_png", "save_html", "save_pdf"].includes(message.method)) execute().finally(() => { pendingCount -= 1; });
     else queue = queue.then(execute).catch(() => {}).finally(() => { pendingCount -= 1; });
   }
   function connect() {
@@ -105,7 +106,7 @@
       current.onMessage.addListener(message => receive(current, message));
       current.onDisconnect.addListener(() => {
         if (port !== current) return;
-        port = null; finishPrompt(false); state.connected = false; state.connecting = false;
+        port = null; service.clearExports?.(); finishPrompt(false); state.connected = false; state.connecting = false;
         state.lastError = String(current.error?.message || "Native Host getrennt. Installation und Firefox-Profil prüfen.").slice(0, 1000);
         badge(); scheduleReconnect();
       });
@@ -122,13 +123,13 @@
     }
     if (message.type === "bridge_status") return startup.then(publicState);
     if (message.type === "bridge_reset_approvals") return startup.then(() => {
-      policy.resetApprovals(); finishPrompt(false); badge(); notifyPopup(); return publicState();
+      policy.resetApprovals(); service.clearExports?.(); finishPrompt(false); badge(); notifyPopup(); return publicState();
     });
     if (message.type === "bridge_reconnect") return startup.then(() => { disconnect(); retryDelay = 1000; connect(); return publicState(); });
     if (message.type === "bridge_settings" && message.settings && typeof message.settings === "object") return startup.then(async () => {
       const before = JSON.stringify(policy.settings);
       const settings = policy.setSettings(normalizeSettings(message.settings));
-      if (JSON.stringify(settings) !== before) finishPrompt(false);
+      if (JSON.stringify(settings) !== before) { service.clearExports?.(); finishPrompt(false); }
       await browser.storage.local.set({ bridgeSettings: settings });
       if (!settings.enabled) disconnect(); else connect();
       badge(); return publicState();

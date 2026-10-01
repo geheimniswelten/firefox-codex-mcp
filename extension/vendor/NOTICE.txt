@@ -1,0 +1,18 @@
+SingleFile Core 1.6.19
+Copyright 2010-2022 Gildas Lormeau and contributors.
+License: AGPL-3.0-or-later, with additional permissions in source-file headers.
+Upstream: https://github.com/gildas-lormeau/single-file-core/tree/v1.6.19
+Package: https://registry.npmjs.org/single-file-core/-/single-file-core-1.6.19.tgz
+Package integrity: sha512-eWcAxr9rD1jaTPLrVxAgZdKXIZ65k/oz+tSn5Y5x3S946ijoIC7Qn1L2qE5y7p5BtLKvQCb4bqQXnee9CWYrTA==
+
+The complete corresponding JavaScript source used to build single-file.bundle.js
+is included, unmodified, in single-file-core/. Its LICENSE is included there.
+Third-party notices and licenses are retained in those sources and the bundle.
+The bundle is a generated transformation; it is not an unmodified upstream file.
+After npm ci, reproduce it with: node scripts/build-html-vendor.mjs
+The build uses the exact esbuild version pinned in package-lock.json.
+
+The extension's SingleFile integration, including html-export.js, is distributed
+under AGPL-3.0-or-later. Its corresponding source is included in the extension
+and in the Firefox MCP source package. SingleFile has no runtime download or
+remote service dependency in this integration.

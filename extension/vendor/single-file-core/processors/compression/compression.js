@@ -1,0 +1,1023 @@
+/*
+ * Copyright 2010-2022 Gildas Lormeau
+ * contact : gildas.lormeau <at> gmail.com
+ * 
+ * This file is part of SingleFile.
+ *
+ *   The code in this file is free software: you can redistribute it and/or 
+ *   modify it under the terms of the GNU Affero General Public License 
+ *   (GNU AGPL) as published by the Free Software Foundation, either version 3
+ *   of the License, or (at your option) any later version.
+ * 
+ *   The code in this file is distributed in the hope that it will be useful, 
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of 
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero 
+ *   General Public License for more details.
+ *
+ *   As additional permission under GNU AGPL version 3 section 7, you may 
+ *   distribute UNMODIFIED VERSIONS OF THIS file without the copy of the GNU 
+ *   AGPL normally required by section 4, provided you include this license 
+ *   notice and a URL through which recipients can access the Corresponding 
+ *   Source.
+ */
+
+import {
+	configure,
+	deflateRaw,
+	BlobReader,
+	TextReader,
+	ZipWriter,
+	Uint8ArrayReader,
+	Uint8ArrayWriter
+} from "./../../vendor/zip/zip.js";
+import {
+	extract
+} from "./compression-extract.js";
+import {
+	display
+} from "./compression-display.js";
+import {
+	router
+} from "./compression-router.js";
+import {
+	DEFAULT_MAX_APPENDED_DATA_LENGTH
+} from "./compression-constants.js";
+
+const { Blob, fetch, TextEncoder, DOMParser } = globalThis;
+
+const COMPRESSIBLE_CONTENT_TYPES = ["application/javascript", "application/x-javascript", "application/ecmascript", "application/json", "application/ld+json", "application/manifest+json", "application/xml", "application/xhtml+xml", "application/rss+xml", "application/atom+xml", "image/svg+xml"];
+const TEXT_CONTENT_TYPE_PREFIX = "text/";
+const NO_COMPRESSION_EXTENSIONS = [".jpg", ".jpeg", ".png", ".apng", ".gif", ".webp", ".avif", ".heif", ".heic", ".jxl", ".pdf", ".woff", ".woff2", ".mp4", ".webm", ".avi", ".mpeg", ".mov", ".ts", ".ogv", ".mp3", ".ogg", ".oga", ".weba", ".m4a", ".aac", ".opus", ".flac"];
+const SCRIPT_PATH = "/lib/single-file-zip.min.js";
+const EXTRA_DATA_TAGS = [
+	["<script type=sfz-data>", "</script>"],
+	["<style type=sfz-data>", "</style>"],
+	["<noframes>", "</noframes>"],
+	["<noembed>", "</noembed>"],
+	["<iframe>", "</iframe>"],
+	["<xmp>", "</xmp>"],
+	["<svg><![CDATA[", "]]></svg>"],
+	["<plaintext>", "</plaintext>"]
+];
+const EMBEDDED_DATA_TAGS = [
+	["<!--", "-->"],
+	...EXTRA_DATA_TAGS,
+];
+const DATA_IDENTIFIER = "sfz-data";
+const TAG_NAME_TERMINATORS = "\t\n\f\r />";
+const EXTRA_DATA_PATTERNS = [
+	[["<script"], ["</script", TAG_NAME_TERMINATORS]],
+	[["<style"], ["</style", TAG_NAME_TERMINATORS]],
+	[["<noframes"], ["</noframes", TAG_NAME_TERMINATORS]],
+	[["<noembed"], ["</noembed", TAG_NAME_TERMINATORS]],
+	[["<iframe"], ["</iframe", TAG_NAME_TERMINATORS]],
+	[["<xmp"], ["</xmp", TAG_NAME_TERMINATORS]],
+	[["<![CDATA["], ["]]>"]],
+	[["<plaintext"], ["</plaintext", TAG_NAME_TERMINATORS]]
+];
+const EMBEDDED_DATA_PATTERNS = [
+	[["<!--"], ["-->"], ["--!>"], ["<!-", undefined, true]],
+	...EXTRA_DATA_PATTERNS,
+];
+const CRC32_TABLE = new Uint32Array(256).map((_, indexTable) => {
+	let crc = indexTable;
+	for (let indexBits = 0; indexBits < 8; indexBits++) {
+		crc = crc & 1 ? 0xEDB88320 ^ (crc >>> 1) : crc >>> 1;
+	}
+	return crc;
+});
+const PNG_IEND_LENGTH = 12;
+const PNG_CHUNK_CRC_LENGTH = 4;
+const PNG_SIGNATURE_LENGTH = 8;
+const PNG_IHDR_LENGTH = 25;
+const COMMENT_LENGTH_FIELD_LENGTH = 2;
+const MAX_ZIP_COMMENT_LENGTH = 65535;
+const PDF_ENTRY_FILENAME = "page.pdf";
+const PRESCAN_WINDOW_LENGTH = 1024;
+const PNG_TEXT_CHUNK_HEADER_LENGTH = 12;
+const PNG_LENGTH_PADDING_LENGTH = 1;
+const PNG_ZIP_CHUNK_TYPE_KEYWORD = new Uint8Array([0x74, 0x45, 0x58, 0x74, 0x5a, 0x49, 0x50, 0]);
+const MAX_HIDDEN_PNG_CHUNK_LENGTH = 0x2D000000;
+const WRAPPER_PATTERN_WINDOW_LENGTH = 12;
+const MINIMAL_DOCTYPE = "<!DOCTYPE html>";
+const UNHIDDEN_FACE_WARNING_MESSAGE = "SingleFile: the page data contains every HTML tag that could hide an embedded file, the archive was written without its";
+const EMBEDDED_IMAGE_LABEL = "PNG image";
+const EMBEDDED_PDF_LABEL = "PDF document";
+const LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
+const CENTRAL_FILE_HEADER_SIGNATURE = 0x02014b50;
+const END_OF_CENTRAL_DIR_SIGNATURE = 0x06054b50;
+const ZIP64_END_OF_CENTRAL_DIR_SIGNATURE = 0x06064b50;
+const ZIP64_END_OF_CENTRAL_DIR_LOCATOR_SIGNATURE = 0x07064b50;
+
+const browser = globalThis.browser;
+
+const PROCESS_OPTION_NAMES = [
+	"createRootDirectory",
+	"declareAppendedData",
+	"disableCompression",
+	"embeddedImage",
+	"embeddedPdf",
+	"extractDataFromPage",
+	"includeBOM",
+	"insertCanonicalLink",
+	"insertMetaCSP",
+	"insertMetaNoIndex",
+	"insertTextBody",
+	"maxAppendedDataLength",
+	"password",
+	"preventAppendedData",
+	"selfExtractingArchive",
+	"url",
+	"zipScript"
+];
+
+export {
+	process,
+	createArchive,
+	escapeHTML,
+	PROCESS_OPTION_NAMES,
+	DEFAULT_MAX_APPENDED_DATA_LENGTH
+};
+
+async function process(pageData, options, lastModDate = new Date()) {
+	let script;
+	const extensionContext = Boolean(browser && browser.runtime && browser.runtime.getURL);
+	if (extensionContext) {
+		configure({ workerURI: "/lib/single-file-z-worker.js" });
+	} else {
+		configure({ useWebWorkers: false });
+	}
+	if (options.zipScript) {
+		script = options.zipScript;
+	} else if (extensionContext) {
+		script = await (await fetch(browser.runtime.getURL(SCRIPT_PATH))).text();
+	}
+	return createArchive(pageData, options, script, zipWriter => {
+		pageData.url = options.url;
+		pageData.archiveTime = (new Date()).toISOString();
+		return addPageResources(zipWriter, pageData, { password: options.password, disableCompression: options.disableCompression }, options.createRootDirectory ? String(Date.now()) + "_" + (options.tabId || 0) + "/" : "", options.url);
+	}, lastModDate);
+}
+
+async function createArchive(pageData, options, script, writeEntries, lastModDate = new Date()) {
+	const zipWriterOptions = { bufferedWrite: true, keepOrder: true, lastModDate, useCompressionStream: true };
+	const entriesWriter = new ZipWriter(new Uint8ArrayWriter(), zipWriterOptions);
+	await writeEntries(entriesWriter);
+	const entriesData = await entriesWriter.close();
+	return buildArchive(pageData, options, script, entriesData, zipWriterOptions);
+}
+
+async function buildArchive(pageData, options, script, entriesData, zipWriterOptions) {
+	const { lastModDate } = zipWriterOptions;
+	const zipDataWriter = new Uint8ArrayWriter();
+	zipDataWriter.init();
+	let extraDataOffset, extraData, embeddedImageDataOffset, endTag, pdfEntry;
+	if (options.embeddedImage) {
+		options.embeddedImage = new Uint8Array(options.embeddedImage);
+	}
+	let imageChunk;
+	if (options.embeddedImage && options.selfExtractingArchive) {
+		imageChunk = getImageHTMLChunk(pageData, options, lastModDate);
+		if (!imageChunk) {
+			dropUnhiddenFace(options, "embeddedImage", EMBEDDED_IMAGE_LABEL);
+		}
+	}
+	if (options.embeddedImage) {
+		const embeddedImageData = getEmbeddedImageData(options.embeddedImage);
+		await writeData(zipDataWriter.writable, options.embeddedImage.slice(0, PNG_SIGNATURE_LENGTH + PNG_IHDR_LENGTH));
+		if (options.selfExtractingArchive) {
+			endTag = imageChunk.endTag;
+			if (imageChunk.startHTMLData.pdfEntry) {
+				pdfEntry = imageChunk.startHTMLData.pdfEntry;
+				pdfEntry.offset += zipDataWriter.offset + PNG_TEXT_CHUNK_HEADER_LENGTH;
+			}
+			await writeData(zipDataWriter.writable, imageChunk.htmlData);
+			await writeData(zipDataWriter.writable, imageChunk.htmlDataCRC);
+		} else if (options.embeddedPdf) {
+			const data = new Uint8Array([...getLength(options.embeddedPdf.length + 4), ...[0x74, 0x45, 0x58, 0x74, 0x50, 0x44, 0x46, 0], ...new Uint8Array(options.embeddedPdf)]);
+			await writeData(zipDataWriter.writable, data);
+			await writeData(zipDataWriter.writable, getCRC32(data, 4));
+		}
+		await writeData(zipDataWriter.writable, embeddedImageData);
+		await writeData(zipDataWriter.writable, new Uint8Array(4));
+		embeddedImageDataOffset = zipDataWriter.offset;
+		await writeData(zipDataWriter.writable, PNG_ZIP_CHUNK_TYPE_KEYWORD);
+		if (options.selfExtractingArchive) {
+			await writeData(zipDataWriter.writable, new TextEncoder().encode(endTag));
+		}
+	}
+	if (options.selfExtractingArchive) {
+		const prependedData = await prependHTMLData(pageData, zipDataWriter, script, options, lastModDate);
+		extraDataOffset = prependedData.extraDataOffset;
+		pdfEntry = pdfEntry || prependedData.pdfEntry;
+	} else if (!options.embeddedImage && options.embeddedPdf) {
+		await writeData(zipDataWriter.writable, new Uint8Array(options.embeddedPdf));
+	}
+	const startOffset = zipDataWriter.offset;
+	const zipWriter = new ZipWriter({ writable: zipDataWriter.writable, size: startOffset }, zipWriterOptions);
+	await zipWriter.appendZip(new Uint8ArrayReader(entriesData));
+	if (pdfEntry) {
+		new DataView(pdfEntry.centralRecord.buffer).setUint32(42, pdfEntry.offset, true);
+		await writeData(zipDataWriter.writable, pdfEntry.centralRecord);
+	}
+	await zipWriter.close(undefined, { preventClose: true });
+	if (pdfEntry && !patchEndOfCentralDirectory(zipDataWriter, pdfEntry.centralRecord.length)) {
+		options.preventEmbeddedPdfEntry = true;
+		return buildArchive(pageData, options, script, entriesData, zipWriterOptions);
+	}
+	const data = zipDataWriter.getData();
+	const zipDataEnd = data.length - COMMENT_LENGTH_FIELD_LENGTH;
+	if (options.selfExtractingArchive) {
+		const lfCodes = [];
+		let crc32 = -1;
+		if (!options.extractDataFromPageTags || options.extractDataFromPageTags[0] != "<plaintext>") {
+			const zipData = data.subarray(startOffset);
+			if (options.extractDataFromPageTags) {
+				const tagIndex = getExtraDataTagIndex(options.extractDataFromPageTags);
+				if (containsDataPattern(zipData, EXTRA_DATA_PATTERNS[tagIndex])) {
+					return findExtraDataTags(zipData, pageData, options, script, entriesData, zipWriterOptions, tagIndex + 1);
+				}
+			} else if (containsDataPattern(zipData, EMBEDDED_DATA_PATTERNS[0])) {
+				return findExtraDataTags(zipData, pageData, options, script, entriesData, zipWriterOptions);
+			}
+		}
+		if (options.extractDataFromPage) {
+			for (let index = startOffset; index < zipDataEnd; index++) {
+				const byte = data[index];
+				crc32 = (crc32 >>> 8) ^ CRC32_TABLE[(crc32 ^ byte) & 0xff];
+				if (byte == 10) {
+					lfCodes.push(0);
+				} else if (byte == 13) {
+					if (index + 1 < zipDataEnd && data[index + 1] == 10) {
+						index++;
+						crc32 = (crc32 >>> 8) ^ CRC32_TABLE[(crc32 ^ 10) & 0xff];
+						lfCodes.push(2);
+					} else {
+						lfCodes.push(1);
+					}
+				}
+			}
+			crc32 = (crc32 ^ -1) >>> 0;
+		}
+		let pageContent = "";
+		if (!options.preventAppendedData) {
+			if (options.extractDataFromPageTags) {
+				pageContent += options.extractDataFromPageTags[1];
+			} else {
+				pageContent += "-->";
+			}
+		}
+		const endTags = options.preventAppendedData || options.embeddedImage ? "" : "</body></html>";
+		if (options.extractDataFromPage) {
+			const words = new Uint32Array(3 + Math.ceil(lfCodes.length / 16));
+			words[0] = crc32;
+			words[1] = zipDataEnd - startOffset;
+			words[2] = lfCodes.length;
+			lfCodes.forEach((lfCode, indexLFCode) => words[3 + (indexLFCode >> 4)] |= lfCode << ((indexLFCode & 15) * 2));
+			const payload = new Uint8Array(words.length * 4);
+			const payloadView = new DataView(payload.buffer);
+			words.forEach((word, indexWord) => payloadView.setUint32(indexWord * 4, word, true));
+			extraData = "<sfz-extra-data>" + base64Encode(deflateRaw(payload)) + "</sfz-extra-data>";
+			if (options.preventAppendedData || extraData.length > getMaxAppendedDataLength(options) - pageContent.length - endTags.length - (options.embeddedImage ? PNG_IEND_LENGTH + PNG_CHUNK_CRC_LENGTH + PNG_LENGTH_PADDING_LENGTH : 0)) {
+				if (!options.extraDataSize) {
+					options.preventAppendedData = true;
+					options.extraDataSize = getReservationSize(extraData.length);
+					return buildArchive(pageData, options, script, entriesData, zipWriterOptions);
+				}
+			} else {
+				pageContent += extraData;
+			}
+		}
+		pageContent += endTags;
+		let pageContentData = new TextEncoder().encode(pageContent);
+		if (options.embeddedImage && !isChunkLengthHidden(data, embeddedImageDataOffset, zipDataWriter.offset + pageContentData.length - embeddedImageDataOffset - 4, imageChunk.tagIndex)) {
+			pageContentData = concatArrays(pageContentData, new Uint8Array(PNG_LENGTH_PADDING_LENGTH).fill(0x20));
+		}
+		await writeData(zipDataWriter.writable, pageContentData);
+	}
+	await zipDataWriter.writable.close();
+	const pageContent = await zipDataWriter.getData();
+	if (options.extractDataFromPage && options.extraDataSize !== undefined) {
+		if (options.extraDataSize >= extraData.length) {
+			pageContent.set(new TextEncoder().encode(extraData), startOffset - extraDataOffset);
+		} else {
+			options.extraDataSize = getReservationSize(extraData.length);
+			return buildArchive(pageData, options, script, entriesData, zipWriterOptions);
+		}
+	}
+	if (options.declareAppendedData) {
+		const appendedDataLength = pageContent.length - data.length +
+			(options.embeddedImage ? PNG_CHUNK_CRC_LENGTH + PNG_IEND_LENGTH : 0);
+		if (appendedDataLength && appendedDataLength <= MAX_ZIP_COMMENT_LENGTH && isDeclaredLengthHidden(pageContent, zipDataEnd, appendedDataLength, options)) {
+			new DataView(pageContent.buffer, pageContent.byteOffset).setUint16(zipDataEnd, appendedDataLength, true);
+		}
+	}
+	if (options.embeddedImage) {
+		const chunkLength = zipDataWriter.offset - embeddedImageDataOffset - 4;
+		if (options.selfExtractingArchive && chunkLength >= MAX_HIDDEN_PNG_CHUNK_LENGTH) {
+			throw new Error("SingleFile: the embedded PNG chunk is too large to be hidden from the HTML parser");
+		}
+		pageContent.set(getLength(chunkLength), embeddedImageDataOffset - 4);
+		return new Blob([
+			pageContent,
+			getCRC32(pageContent, embeddedImageDataOffset),
+			options.embeddedImage.slice(options.embeddedImage.length - PNG_IEND_LENGTH)
+		], { type: "application/octet-stream" });
+	} else {
+		return new Blob([pageContent], { type: "application/octet-stream" });
+	}
+}
+
+function getMaxAppendedDataLength(options) {
+	return options.maxAppendedDataLength === undefined ? DEFAULT_MAX_APPENDED_DATA_LENGTH : options.maxAppendedDataLength;
+}
+
+function isDeclaredLengthHidden(pageContent, zipDataEnd, appendedDataLength, options) {
+	if (options.extractDataFromPageTags && options.extractDataFromPageTags[0] == "<plaintext>") {
+		return true;
+	}
+	const tail = pageContent.slice(zipDataEnd - WRAPPER_PATTERN_WINDOW_LENGTH, zipDataEnd + COMMENT_LENGTH_FIELD_LENGTH);
+	new DataView(tail.buffer).setUint16(WRAPPER_PATTERN_WINDOW_LENGTH, appendedDataLength, true);
+	const tagIndex = options.extractDataFromPageTags ? getExtraDataTagIndex(options.extractDataFromPageTags) + 1 : 0;
+	return !containsDataPattern(tail, EMBEDDED_DATA_PATTERNS[tagIndex]);
+}
+
+function isChunkLengthHidden(data, embeddedImageDataOffset, chunkLength, tagIndex) {
+	const lengthOffset = embeddedImageDataOffset - 4;
+	const window = concatArrays(
+		data.subarray(Math.max(0, lengthOffset - WRAPPER_PATTERN_WINDOW_LENGTH), lengthOffset),
+		getLength(chunkLength),
+		data.subarray(embeddedImageDataOffset, embeddedImageDataOffset + PNG_ZIP_CHUNK_TYPE_KEYWORD.length));
+	return !containsDataPattern(window, EMBEDDED_DATA_PATTERNS[tagIndex]);
+}
+
+function getCRC32(data, indexData = 0) {
+	const crcArray = new Uint8Array(4);
+	setUint32(crcArray, getCRC32Value(data, indexData));
+	return crcArray;
+}
+
+function getCRC32Value(data, indexData = 0) {
+	let crc = -1;
+	for (; indexData < data.length; indexData++) {
+		crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ data[indexData]) & 0xff];
+	}
+	return (crc ^ -1) >>> 0;
+}
+
+function getPDFEntry(embeddedPdf, lastModDate = new Date()) {
+	const filename = new TextEncoder().encode(PDF_ENTRY_FILENAME);
+	const crc32 = getCRC32Value(embeddedPdf);
+	const dosTime = (lastModDate.getHours() << 11) | (lastModDate.getMinutes() << 5) | (lastModDate.getSeconds() >> 1);
+	const dosDate = (Math.max(0, lastModDate.getFullYear() - 1980) << 9) | ((lastModDate.getMonth() + 1) << 5) | lastModDate.getDate();
+	const localHeader = new Uint8Array(30 + filename.length);
+	const localHeaderView = new DataView(localHeader.buffer);
+	localHeaderView.setUint32(0, LOCAL_FILE_HEADER_SIGNATURE, true);
+	localHeaderView.setUint16(4, 20, true);
+	localHeaderView.setUint16(10, dosTime, true);
+	localHeaderView.setUint16(12, dosDate, true);
+	localHeaderView.setUint32(14, crc32, true);
+	localHeaderView.setUint32(18, embeddedPdf.length, true);
+	localHeaderView.setUint32(22, embeddedPdf.length, true);
+	localHeaderView.setUint16(26, filename.length, true);
+	localHeader.set(filename, 30);
+	const centralRecord = new Uint8Array(46 + filename.length);
+	const centralRecordView = new DataView(centralRecord.buffer);
+	centralRecordView.setUint32(0, CENTRAL_FILE_HEADER_SIGNATURE, true);
+	centralRecordView.setUint16(4, 0x0300, true);
+	centralRecordView.setUint16(6, 20, true);
+	centralRecordView.setUint16(12, dosTime, true);
+	centralRecordView.setUint16(14, dosDate, true);
+	centralRecordView.setUint32(16, crc32, true);
+	centralRecordView.setUint32(20, embeddedPdf.length, true);
+	centralRecordView.setUint32(24, embeddedPdf.length, true);
+	centralRecordView.setUint16(28, filename.length, true);
+	centralRecordView.setUint32(38, 0o100644 << 16, true);
+	centralRecord.set(filename, 46);
+	return { localHeader, centralRecord };
+}
+
+function patchEndOfCentralDirectory(zipDataWriter, centralRecordLength) {
+	const view = new DataView(zipDataWriter.array.buffer);
+	const offsetEOCD = zipDataWriter.offset - 22;
+	if (view.getUint32(offsetEOCD, true) != END_OF_CENTRAL_DIR_SIGNATURE) {
+		return false;
+	}
+	const entriesOnDisk = view.getUint16(offsetEOCD + 8, true);
+	const totalEntries = view.getUint16(offsetEOCD + 10, true);
+	const centralDirectorySize = view.getUint32(offsetEOCD + 12, true);
+	const offsetLocator = offsetEOCD - 20;
+	let offsetZip64EOCD;
+	if (offsetLocator >= 0 && view.getUint32(offsetLocator, true) == ZIP64_END_OF_CENTRAL_DIR_LOCATOR_SIGNATURE) {
+		offsetZip64EOCD = Number(view.getBigUint64(offsetLocator + 8, true)) + centralRecordLength;
+		if (view.getUint32(offsetZip64EOCD, true) != ZIP64_END_OF_CENTRAL_DIR_SIGNATURE) {
+			return false;
+		}
+	} else if (entriesOnDisk + 1 >= 0xFFFF || totalEntries + 1 >= 0xFFFF || centralDirectorySize + centralRecordLength >= 0xFFFFFFFF) {
+		return false;
+	}
+	if (entriesOnDisk != 0xFFFF) {
+		view.setUint16(offsetEOCD + 8, entriesOnDisk + 1, true);
+	}
+	if (totalEntries != 0xFFFF) {
+		view.setUint16(offsetEOCD + 10, totalEntries + 1, true);
+	}
+	if (centralDirectorySize != 0xFFFFFFFF) {
+		view.setUint32(offsetEOCD + 12, centralDirectorySize + centralRecordLength, true);
+	}
+	if (offsetZip64EOCD !== undefined) {
+		view.setBigUint64(offsetLocator + 8, BigInt(offsetZip64EOCD), true);
+		view.setBigUint64(offsetZip64EOCD + 24, view.getBigUint64(offsetZip64EOCD + 24, true) + 1n, true);
+		view.setBigUint64(offsetZip64EOCD + 32, view.getBigUint64(offsetZip64EOCD + 32, true) + 1n, true);
+		view.setBigUint64(offsetZip64EOCD + 40, view.getBigUint64(offsetZip64EOCD + 40, true) + BigInt(centralRecordLength), true);
+	}
+	return true;
+}
+
+function inlineFunction(bootstrapFunction) {
+	return bootstrapFunction.toString().replace(/^[ \t]*\/\/.*$/gm, "").replace(/\n|\t/g, "");
+}
+
+function getReservationSize(length) {
+	return Math.ceil(length * 1.01) + 32;
+}
+
+function getLength(length) {
+	const lengthArray = new Uint8Array(4);
+	setUint32(lengthArray, length);
+	return lengthArray;
+}
+
+function setUint32(data, value) {
+	data[0] = value >> 24;
+	data[1] = value >> 16;
+	data[2] = value >> 8;
+	data[3] = value;
+}
+
+async function prependHTMLData(pageData, zipDataWriter, script, options, lastModDate) {
+	let pageContent = "";
+	let pdfEntry;
+	if (!options.embeddedImage) {
+		const startHTMLData = getStartHTMLArray(pageData, options, lastModDate);
+		if (startHTMLData.pdfEntry) {
+			pdfEntry = startHTMLData.pdfEntry;
+			pdfEntry.offset += zipDataWriter.offset;
+		}
+		await writeData(zipDataWriter.writable, startHTMLData.htmlArray);
+	}
+	pageContent += "<div id=sfz-wait-message>Please wait...</div>";
+	if (options.extractDataFromPage) {
+		pageContent += "<div id=sfz-error-message><strong>Error</strong>: Cannot extract the data of the page.";
+		pageContent += " The file is still a valid ZIP file, you can rename it with a \"zip\" extension and unzip it to display the page and its resources.</div>";
+	} else {
+		pageContent += "<div id=sfz-error-message><strong>Error</strong>: Cannot open the page from the filesystem.";
+		pageContent += "<ul style='line-height:20px;'>";
+		pageContent += "<li style='margin-bottom:10px'><strong>Chrome/Edge/Brave</strong>: Install <a href='https://www.getsinglefile.com'>SingleFile</a> and enable the option \"Allow access to file URLs\" in the details page of the extension.</li>";
+		pageContent += "<li><strong>Safari</strong>: Select \"Security > Disable Local File Restrictions\" in the \"Develop > Developer settings\" menu.</li></ul></div>";
+	}
+	if (pageData.tocContent) {
+		pageContent += pageData.tocContent;
+	}
+	if (options.insertTextBody && !options.password) {
+		const doc = (new DOMParser()).parseFromString(pageData.content, "text/html");
+		doc.body.querySelectorAll("style, script, noscript").forEach(element => element.remove());
+		let textBody = "";
+		if (options.extractDataFromPage) {
+			textBody += (pageData.title || "") + "\n\n";
+		}
+		textBody += doc.body.innerText;
+		doc.body.querySelectorAll("single-file-note").forEach(node => {
+			const template = node.querySelector("template");
+			if (template) {
+				const docTemplate = (new DOMParser()).parseFromString(template.innerHTML, "text/html");
+				textBody += "\n" + docTemplate.body.querySelector("textarea").value;
+			}
+		});
+		textBody = textBody.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n +/g, "\n").replace(/\n\n\n+/g, "\n\n").trim();
+		pageContent += "\n<main hidden>\n" + textBody + "\n</main>\n";
+	}
+	const bootstrapBody = options.multiPageArchive ?
+		"(" + inlineFunction(router) + ")(content,{extract:" +
+		inlineFunction(extract) + ",display:" +
+		inlineFunction(display) + "})" :
+		"(" + inlineFunction(extract) + ")(content,{prompt}).then(({docContent}) => " +
+		inlineFunction(display) + "(document,docContent))";
+	script = "<script>" +
+		script +
+		"document.currentScript.remove();" +
+		"globalThis.bootstrap=(()=>{let bootstrapStarted;return async content=>{if (bootstrapStarted) return bootstrapStarted; bootstrapStarted = " +
+		bootstrapBody + ";return bootstrapStarted;}})();(" +
+		inlineFunction(getContent) + ")().then(globalThis.bootstrap).then(() => document.dispatchEvent(new CustomEvent(\"single-file-display-infobar\"))).catch(error => {" +
+		"console.error(error);" +
+		"const waitMessage = document.getElementById(\"sfz-wait-message\");" +
+		"if (waitMessage) { waitMessage.remove(); }" +
+		"const errorMessage = document.getElementById(\"sfz-error-message\");" +
+		"if (errorMessage) { errorMessage.hidden = false; document.body.hidden = false; }" +
+		"});" +
+		"</script>";
+	pageContent += script;
+	let extraData = "";
+	if (options.extractDataFromPage && options.extraDataSize) {
+		const extraTags = "<sfz-extra-data></sfz-extra-data>";
+		extraData += extraTags + new Array(options.extraDataSize - extraTags.length).fill(" ").join("");
+	}
+	pageContent += extraData;
+	const startTag = getDataStartTag(options.extractDataFromPageTags || EMBEDDED_DATA_TAGS[0]);
+	pageContent += startTag;
+	const extraDataOffset = startTag.length + extraData.length;
+	await writeData(zipDataWriter.writable, (new TextEncoder()).encode(pageContent));
+	return { extraDataOffset, pdfEntry };
+}
+
+function getDataStartTag([startTag]) {
+	if (startTag == "<!--") {
+		return startTag + DATA_IDENTIFIER;
+	}
+	const tagEnd = startTag.indexOf(">");
+	return startTag.slice(0, tagEnd) + " id=" + DATA_IDENTIFIER + startTag.slice(tagEnd);
+}
+
+function getStartHTMLArray(pageData, options, lastModDate, startTag = "") {
+	let bom = "";
+	if (options.includeBOM && !options.extractDataFromPage && !options.embeddedImage) {
+		bom = "\ufeff";
+	}
+	const doctype = options.embeddedImage ? "" : pageData.doctype;
+	const charset = options.extractDataFromPage ? "windows-1252" : "utf-8";
+	const documentStart = "<html data-sfz><meta charset=" + charset + ">";
+	const startOffset = options.embeddedImage ?
+		PNG_SIGNATURE_LENGTH + PNG_IHDR_LENGTH + PNG_TEXT_CHUNK_HEADER_LENGTH : 0;
+	let html = bom + doctype + documentStart;
+	if (startOffset + new TextEncoder().encode(html).length > PRESCAN_WINDOW_LENGTH) {
+		html = bom + MINIMAL_DOCTYPE + documentStart;
+	}
+	const comment = pageData.comment && !options.embeddedImage && !options.password ? "<!--" + escapeCommentData(pageData.comment) + "-->" : "";
+	const htmlHeadData = getHTMLHeadData(pageData, options);
+	let htmlArray, pdfEntry;
+	if (options.embeddedPdf) {
+		const embeddedPdf = new Uint8Array(options.embeddedPdf);
+		pdfEntry = options.preventEmbeddedPdfEntry ? undefined : getPDFEntry(embeddedPdf, lastModDate);
+		const localHeader = pdfEntry ? pdfEntry.localHeader : new Uint8Array(0);
+		const pdfTagIndex = findEmbeddedDataTagIndex(concatArrays(localHeader, embeddedPdf));
+		if (pdfTagIndex == -1) {
+			dropUnhiddenFace(options, "embeddedPdf", EMBEDDED_PDF_LABEL);
+			pdfEntry = undefined;
+		} else {
+			const [pdfStartTag, pdfEndTag] = EMBEDDED_DATA_TAGS[pdfTagIndex];
+			let htmlArray1 = new TextEncoder().encode(html + pdfStartTag);
+			if (startOffset + htmlArray1.length + localHeader.length > PRESCAN_WINDOW_LENGTH) {
+				htmlArray1 = new TextEncoder().encode(bom + MINIMAL_DOCTYPE + documentStart + pdfStartTag);
+			}
+			const htmlArray2 = new TextEncoder().encode(pdfEndTag + comment + htmlHeadData + startTag);
+			htmlArray = new Uint8Array(htmlArray1.length + localHeader.length + embeddedPdf.length + htmlArray2.length);
+			htmlArray.set(htmlArray1);
+			htmlArray.set(localHeader, htmlArray1.length);
+			htmlArray.set(embeddedPdf, htmlArray1.length + localHeader.length);
+			htmlArray.set(htmlArray2, htmlArray1.length + localHeader.length + embeddedPdf.length);
+			if (pdfEntry) {
+				pdfEntry.offset = htmlArray1.length;
+			}
+		}
+	}
+	if (!options.embeddedPdf) {
+		htmlArray = new TextEncoder().encode(html + comment + htmlHeadData + startTag);
+	}
+	return { htmlArray, pdfEntry };
+}
+
+function getHTMLHeadData(pageData, options) {
+	let pageContent = "";
+	const title = options.password ? "" : escapeHTML(pageData.title || "");
+	pageContent += "<title>" + title + "</title>";
+	if (options.insertCanonicalLink && !options.password) {
+		pageContent += "<link rel=canonical href=\"" + escapeHTML(options.url) + "\">";
+	}
+	if (options.insertMetaNoIndex) {
+		pageContent += "<meta name=robots content=noindex>";
+	}
+	if (pageData.viewport) {
+		pageContent += "<meta name=viewport content=\"" + escapeHTML(pageData.viewport) + "\">";
+	}
+	if (options.insertMetaCSP) {
+		const cspContent = "default-src 'none';connect-src 'self' data: blob:;font-src 'self' data: blob:;img-src 'self' data: blob:;style-src 'self' 'unsafe-inline' data: blob:;frame-src 'self' data: blob:;media-src 'self' data: blob:;script-src 'self' 'unsafe-inline' data: blob:;object-src 'self' data: blob:;form-action 'none';base-uri 'none'";
+		pageContent += `<meta http-equiv=content-security-policy content=${JSON.stringify(cspContent)}>`;
+	}
+	pageContent += "<style>@keyframes display-wait-message{0%{opacity:0}100%{opacity:1}}body{color:transparent}div{color:initial}body>:not(#sfz-wait-message,#sfz-error-message){display:none}</style>";
+	pageContent += "<body hidden>";
+	return pageContent;
+}
+
+function escapeCommentData(value) {
+	let data = value.replace(/--(!?)>/g, "--$1 >");
+	if (data.startsWith(">") || data.startsWith("->")) {
+		data = " " + data;
+	}
+	if (data.endsWith("<!-")) {
+		data += " ";
+	}
+	return data;
+}
+
+function escapeHTML(value) {
+	return Array.from(value).map(character => {
+		const codePoint = character.codePointAt(0);
+		return codePoint < 32 || codePoint > 126 || character == "&" || character == "<" || character == ">" || character == "\"" ?
+			"&#" + codePoint + ";" : character;
+	}).join("");
+}
+
+function getExtraDataTagIndex(extractDataFromPageTags) {
+	const tagIndex = EXTRA_DATA_TAGS.findIndex(([startTag]) => startTag == extractDataFromPageTags[0]);
+	if (tagIndex == -1) {
+		throw new Error("Unknown data tags: " + extractDataFromPageTags[0]);
+	}
+	return tagIndex;
+}
+
+function findExtraDataTags(zipData, pageData, options, script, entriesData, zipWriterOptions, indexExtractDataFromPageTags = 0) {
+	const plaintextTag = EXTRA_DATA_TAGS[indexExtractDataFromPageTags][0] == "<plaintext>";
+	const matchTag = !plaintextTag && containsDataPattern(zipData, EXTRA_DATA_PATTERNS[indexExtractDataFromPageTags]);
+	if (matchTag) {
+		return findExtraDataTags(zipData, pageData, options, script, entriesData, zipWriterOptions, indexExtractDataFromPageTags + 1);
+	} else {
+		options.extractDataFromPageTags = EXTRA_DATA_TAGS[indexExtractDataFromPageTags];
+		if (options.extractDataFromPageTags[0] == "<plaintext>") {
+			options.preventAppendedData = true;
+		}
+		return buildArchive(pageData, options, script, entriesData, zipWriterOptions);
+	}
+}
+
+function findEmbeddedDataTagIndex(data, fromIndex = 0) {
+	const tagIndex = EMBEDDED_DATA_PATTERNS.slice(fromIndex, -1).findIndex(patterns => !containsDataPattern(data, patterns));
+	return tagIndex == -1 ? -1 : tagIndex + fromIndex;
+}
+
+function containsDataPattern(data, patterns) {
+	const patternsByCharCode = new Map();
+	for (const pattern of patterns) {
+		const [text, , atEnd] = pattern;
+		if (atEnd) {
+			if (matchesDataPatternAt(data, pattern, data.length - text.length)) {
+				return true;
+			}
+		} else {
+			const charCode = text.charCodeAt(0);
+			indexPatternByCharCode(patternsByCharCode, charCode, pattern);
+			const alternateCharCode = getAlternateCharCode(charCode);
+			if (alternateCharCode != -1) {
+				indexPatternByCharCode(patternsByCharCode, alternateCharCode, pattern);
+			}
+		}
+	}
+	for (const [charCode, candidates] of patternsByCharCode) {
+		for (let index = data.indexOf(charCode); index != -1; index = data.indexOf(charCode, index + 1)) {
+			for (let indexCandidate = 0; indexCandidate < candidates.length; indexCandidate++) {
+				if (matchesDataPatternAt(data, candidates[indexCandidate], index)) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+function indexPatternByCharCode(patternsByCharCode, charCode, pattern) {
+	if (!patternsByCharCode.has(charCode)) {
+		patternsByCharCode.set(charCode, []);
+	}
+	patternsByCharCode.get(charCode).push(pattern);
+}
+
+function matchesDataPatternAt(data, [text, terminators], index) {
+	const textLength = text.length;
+	if (index < 0 || index + textLength > data.length) {
+		return false;
+	}
+	for (let indexText = 0; indexText < textLength; indexText++) {
+		const charCode = text.charCodeAt(indexText);
+		const code = data[index + indexText];
+		if (code != charCode && code != getAlternateCharCode(charCode)) {
+			return false;
+		}
+	}
+	return terminators === undefined || isTerminatorCode(terminators, data[index + textLength]);
+}
+
+function isTerminatorCode(terminators, code) {
+	return code !== undefined && terminators.includes(String.fromCharCode(code));
+}
+
+function getAlternateCharCode(charCode) {
+	const lowerCharCode = charCode | 0x20;
+	return lowerCharCode >= 0x61 && lowerCharCode <= 0x7a ? charCode ^ 0x20 : -1;
+}
+
+function concatArrays(...arrays) {
+	const result = new Uint8Array(arrays.reduce((length, array) => length + array.length, 0));
+	let offset = 0;
+	arrays.forEach(array => {
+		result.set(array, offset);
+		offset += array.length;
+	});
+	return result;
+}
+
+function getImageHTMLChunk(pageData, options, lastModDate) {
+	const embeddedImageData = concatArrays(getEmbeddedImageData(options.embeddedImage), new Uint8Array(4), PNG_ZIP_CHUNK_TYPE_KEYWORD);
+	let tagIndex = findEmbeddedDataTagIndex(embeddedImageData);
+	while (tagIndex != -1) {
+		const [startTag, endTag] = EMBEDDED_DATA_TAGS[tagIndex];
+		const startHTMLData = getStartHTMLArray(pageData, options, lastModDate, startTag);
+		const htmlData = new Uint8Array([...getLength(startHTMLData.htmlArray.length + 4), ...[0x74, 0x45, 0x58, 0x74, 0x50, 0x4e, 0x47, 0], ...startHTMLData.htmlArray]);
+		const htmlDataCRC = getCRC32(htmlData, 4);
+		const wrappedData = concatArrays(htmlDataCRC, embeddedImageData);
+		if ((tagIndex == 0 && (htmlDataCRC[0] == 0x3e || (htmlDataCRC[0] == 0x2d && htmlDataCRC[1] == 0x3e))) ||
+			findEmbeddedDataTagIndex(wrappedData, tagIndex) != tagIndex) {
+			tagIndex = findEmbeddedDataTagIndex(embeddedImageData, tagIndex + 1);
+		} else {
+			return { tagIndex, endTag, startHTMLData, htmlData, htmlDataCRC };
+		}
+	}
+}
+
+function getEmbeddedImageData(embeddedImage) {
+	return embeddedImage.slice(PNG_SIGNATURE_LENGTH + PNG_IHDR_LENGTH, embeddedImage.length - PNG_IEND_LENGTH);
+}
+
+function dropUnhiddenFace(options, name, label) {
+	delete options[name];
+	console.warn(UNHIDDEN_FACE_WARNING_MESSAGE, label); // eslint-disable-line no-console
+}
+
+async function writeData(writable, array) {
+	const streamWriter = writable.getWriter();
+	await streamWriter.ready;
+	await streamWriter.write(array);
+	streamWriter.releaseLock();
+}
+
+async function addPageResources(zipWriter, pageData, options, prefixName, url) {
+	const resources = {};
+	for (const resourceType of Object.keys(pageData.resources)) {
+		for (const data of pageData.resources[resourceType]) {
+			data.password = options.password;
+			if (data.url && !data.url.startsWith("data:")) {
+				resources[data.name] = data.url;
+			}
+		}
+	}
+	const jsonContent = JSON.stringify({
+		originalUrl: pageData.url,
+		title: pageData.title,
+		archiveTime: pageData.archiveTime,
+		indexFilename: "index.html",
+		resources
+	}, null, 2);
+	await Promise.all([
+		Promise.all([
+			addFile(zipWriter, prefixName, { name: "index.html", extension: ".html", content: pageData.content, url, password: options.password }, options.disableCompression),
+			addFile(zipWriter, prefixName, { name: "manifest.json", extension: ".json", content: jsonContent, password: options.password }, options.disableCompression)
+		]),
+		Promise.all(Object.keys(pageData.resources).map(async resourceType =>
+			Promise.all(pageData.resources[resourceType].map(data => {
+				if (resourceType == "frames") {
+					data.archiveTime = pageData.archiveTime;
+					return addPageResources(zipWriter, data, options, prefixName + data.name, data.url);
+				} else {
+					return addFile(zipWriter, prefixName, data, options.disableCompression);
+				}
+			}))
+		))
+	]);
+}
+
+async function addFile(zipWriter, prefixName, data, disableCompression) {
+	const dataReader = typeof data.content == "string" ? new TextReader(data.content) : new BlobReader(new Blob([new Uint8Array(data.content)]));
+	const options = { password: data.password, bufferedWrite: true };
+	if (!data.password) {
+		options.comment = data.url && data.url.startsWith("data:") ? "data:" : data.url;
+	}
+	if (disableCompression || (!isCompressibleContentType(data.contentType) && NO_COMPRESSION_EXTENSIONS.includes(data.extension))) {
+		options.level = 0;
+	}
+	await zipWriter.add(prefixName + data.name, dataReader, options);
+}
+
+function isCompressibleContentType(contentType) {
+	return Boolean(contentType) && (contentType.startsWith(TEXT_CONTENT_TYPE_PREFIX) || COMPRESSIBLE_CONTENT_TYPES.includes(contentType));
+}
+
+async function getContent() {
+	const BASE64_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	const DATA_IDENTIFIER = "sfz-data";
+	const WRAPPER_TAG_NAMES = ["script", "style", "noframes", "noembed", "iframe", "xmp", "svg", "plaintext"];
+	const { Blob, XMLHttpRequest, NodeFilter, document, zip, location } = globalThis;
+	const characterMap = new Map([
+		[65533, 0], [8364, 128], [8218, 130], [402, 131], [8222, 132], [8230, 133], [8224, 134], [8225, 135], [710, 136], [8240, 137],
+		[352, 138], [8249, 139], [338, 140], [381, 142], [8216, 145], [8217, 146], [8220, 147], [8221, 148], [8226, 149], [8211, 150],
+		[8212, 151], [732, 152], [8482, 153], [353, 154], [8250, 155], [339, 156], [382, 158], [376, 159]
+	]);
+	const crc32Table = new Uint32Array(256).map((_, indexTable) => {
+		let crc = indexTable;
+		for (let indexBits = 0; indexBits < 8; indexBits++) {
+			crc = crc & 1 ? 0xEDB88320 ^ (crc >>> 1) : crc >>> 1;
+		}
+		return crc;
+	});
+	return new Promise((resolve, reject) => {
+		let aborted = false;
+		getPageData();
+
+		async function extractDataFromDocument() {
+			try {
+				await waitForDocumentReady(document);
+				document.body.querySelectorAll("meta, style").forEach(element => document.head.appendChild(element));
+				const pageData = extractPageData();
+				displayMessage("sfz-wait-message", 2);
+				resolve(pageData);
+			} catch (error) {
+				// eslint-disable-next-line no-console
+				console.error(error);
+				displayMessage("sfz-error-message", 2);
+				reject(error);
+			}
+		}
+
+		function getPageData() {
+			const xhr = new XMLHttpRequest();
+			xhr.responseType = "blob";
+			xhr.open("GET", "");
+			xhr.onerror = () => extractDataFromDocument();
+			xhr.send();
+			xhr.onreadystatechange = () => {
+				if (xhr.readyState === 2 && !aborted) {
+					if (xhr.status === 200) {
+						aborted = true;
+						const httpRangeSupport = xhr.getResponseHeader("Accept-Ranges") === "bytes";
+						xhr.abort();
+						displayMessage("sfz-wait-message", 2, true);
+						if (httpRangeSupport) {
+							resolve(new zip.HttpRangeReader(location.href, {
+								useXHR: true,
+								combineSizeEocd: true
+							}));
+						} else {
+							getPageData();
+						}
+					} else {
+						xhr.abort();
+						extractDataFromDocument();
+					}
+				}
+			};
+			if (aborted) {
+				xhr.onload = () => {
+					if (xhr.status === 200) {
+						resolve(xhr.response);
+					} else {
+						extractDataFromDocument();
+					}
+				};
+			}
+		}
+	});
+
+	function waitForDocumentReady(document) {
+		return new Promise(resolve => {
+			if (document.readyState === "complete" || document.readyState === "interactive") {
+				resolve();
+			} else {
+				document.addEventListener("DOMContentLoaded", () => resolve());
+			}
+		});
+	}
+
+	function displayMessage(elementId, delay = 0, keepContent) {
+		const element = document.getElementById(elementId);
+		if (element) {
+			Array.from(document.body.childNodes).forEach(node => {
+				if (node.id != elementId) {
+					if (node.id == "sfz-wait-message" || node.id == "sfz-error-message") {
+						node.hidden = true;
+					} else if (!keepContent) {
+						node.remove();
+					}
+				}
+			});
+			element.hidden = false;
+			document.body.hidden = false;
+			element.style = "opacity: 0; animation: 0s linear " + delay + "s display-wait-message 1 normal forwards";
+		}
+	}
+
+	function extractPageData() {
+		const zipDataElement = document.querySelector("sfz-extra-data");
+		if (zipDataElement) {
+			const inflatedPayload = zip.inflateRaw(base64Decode(zipDataElement.textContent));
+			const payload = new DataView(inflatedPayload.buffer, inflatedPayload.byteOffset, inflatedPayload.length & -4);
+			const candidates = Array.from(document.querySelectorAll("[id=" + DATA_IDENTIFIER + "]")).filter(element => WRAPPER_TAG_NAMES.includes(element.localName));
+			let startIndex = 0;
+			if (!candidates.length) {
+				const walker = document.createTreeWalker(document, NodeFilter.SHOW_COMMENT);
+				while (walker.nextNode()) {
+					if (walker.currentNode.data.startsWith(DATA_IDENTIFIER)) {
+						candidates.push(walker.currentNode);
+					}
+				}
+				startIndex = DATA_IDENTIFIER.length;
+			}
+			if (candidates.length > 1) {
+				throw new Error("Multiple zip data candidates found");
+			}
+			if (candidates.length) {
+				return decodeZipData(candidates[0], payload, startIndex);
+			}
+		}
+		throw new Error("Extra zip data not found");
+	}
+
+	function decodeZipData(dataNode, payload, startIndex) {
+		const expectedCRC32 = payload.getUint32(0, true);
+		const zipDataLength = payload.getUint32(4, true);
+		const lfCodesLength = payload.getUint32(8, true);
+		const zipData = new Uint8Array(zipDataLength + 2);
+		const { textContent } = dataNode;
+		let offset = 0;
+		let indexLFCode = 0;
+		let crc32 = -1;
+		for (let index = startIndex; index < textContent.length && offset < zipDataLength; index++) {
+			const charCode = textContent.charCodeAt(index);
+			if (charCode == 10) {
+				const lfCode = (payload.getUint32(12 + (indexLFCode >> 4) * 4, true) >>> ((indexLFCode & 15) * 2)) & 3;
+				indexLFCode++;
+				if (lfCode == 3) {
+					throw new Error("Unsupported newline code in the extracted zip data");
+				} else if (lfCode == 0) {
+					writeByte(10);
+				} else {
+					writeByte(13);
+					if (lfCode == 2) {
+						writeByte(10);
+					}
+				}
+			} else {
+				writeByte(charCode > 255 ? characterMap.get(charCode) : charCode);
+			}
+		}
+		crc32 = (crc32 ^ -1) >>> 0;
+		if (offset != zipDataLength || indexLFCode != lfCodesLength || crc32 != expectedCRC32) {
+			throw new Error("Invalid checksum of the extracted zip data");
+		}
+		return new Blob([zipData], { type: "application/octet-stream" });
+
+		function writeByte(byte) {
+			zipData[offset] = byte;
+			crc32 = (crc32 >>> 8) ^ crc32Table[(crc32 ^ byte) & 0xff];
+			offset++;
+		}
+	}
+
+	function base64Decode(b64) {
+		b64 = String(b64).replace(/[^A-Za-z0-9+/=]/g, "");
+		const len = b64.length;
+		const out = [];
+		for (let i = 0; i < len; i += 4) {
+			const a = BASE64_TABLE.indexOf(b64[i]);
+			const b = BASE64_TABLE.indexOf(b64[i + 1]);
+			const c = BASE64_TABLE.indexOf(b64[i + 2]);
+			const d = BASE64_TABLE.indexOf(b64[i + 3]);
+			const n = (a << 18) | (b << 12) | ((c & 63) << 6) | (d & 63);
+			out.push((n >> 16) & 0xff);
+			if (b64[i + 2] !== "=") {
+				out.push((n >> 8) & 0xff);
+			}
+			if (b64[i + 3] !== "=") {
+				out.push(n & 0xff);
+			}
+		}
+		return new Uint8Array(out);
+	}
+}
+
+const BASE64_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function base64Encode(bytes) {
+	let out = "";
+	const len = bytes.length;
+	let i = 0;
+	for (; i + 2 < len; i += 3) {
+		const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+		out += BASE64_TABLE[(n >> 18) & 63] + BASE64_TABLE[(n >> 12) & 63] + BASE64_TABLE[(n >> 6) & 63] + BASE64_TABLE[n & 63];
+	}
+	const rem = len - i;
+	if (rem === 1) {
+		const n = bytes[i] << 16;
+		out += BASE64_TABLE[(n >> 18) & 63] + BASE64_TABLE[(n >> 12) & 63] + "==";
+	} else if (rem === 2) {
+		const n = (bytes[i] << 16) | (bytes[i + 1] << 8);
+		out += BASE64_TABLE[(n >> 18) & 63] + BASE64_TABLE[(n >> 12) & 63] + BASE64_TABLE[(n >> 6) & 63] + "=";
+	}
+	return out;
+}

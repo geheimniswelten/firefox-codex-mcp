@@ -1,7 +1,7 @@
 /* Shared as a plain background script and a side-effect module in Node tests. */
 (() => {
   "use strict";
-  const VERSION = "0.1.2";
+  const VERSION = "0.1.3";
   const SESSION_KEY = "firefox-codex-mcp.metadata.v1";
   const MAX_RESPONSE_BYTES = 800000; // Leave room for the native RPC envelope.
   const COLORS = ["blue", "cyan", "grey", "green", "orange", "pink", "purple", "red", "yellow"];
@@ -25,7 +25,9 @@
     create_window: ["url", "tabId", "focused", "incognito"], update_window: ["windowId", "focused", "state"], close_window: ["windowId"],
     list_groups: ["windowId"], group_tabs: ["tabIds", "groupId", "windowId", "title", "color", "collapsed"],
     ungroup_tabs: ["tabIds"], update_group: ["groupId", "title", "color", "collapsed"], move_group: ["groupId", "windowId", "index"],
-    read_content: ["tabId", "format", "selector", "maxChars", "includeLinks"]
+    read_content: ["tabId", "format", "selector", "maxChars", "includeLinks"],
+    save_png: ["tabId", "fullPage", "loadDeferred", "maxHeight"], save_html: ["tabId", "loadDeferred"], save_pdf: ["tabId"],
+    export_chunk: ["transferId", "index"], export_release: ["transferId"]
   };
   function validUrl(value) {
     if (typeof value !== "string" || value.length > 32768) fail("url muss eine Zeichenfolge mit höchstens 32768 Zeichen sein.");
@@ -43,13 +45,13 @@
       const max = key === "groupId" ? Number.MAX_SAFE_INTEGER : 2147483647;
       if (!Number.isSafeInteger(p[key]) || p[key] < min || p[key] > max) fail(`${key} muss eine ganze Zahl zwischen ${min} und ${max} sein.`);
     }
-    for (const key of ["active", "audible", "muted", "discarded", "pinned", "bypassCache", "focused", "incognito", "populate", "collapsed", "includeLinks", "enabled"]) {
+    for (const key of ["active", "audible", "muted", "discarded", "pinned", "bypassCache", "focused", "incognito", "populate", "collapsed", "includeLinks", "enabled", "fullPage", "loadDeferred"]) {
       if (own(p, key) && typeof p[key] !== "boolean") fail(`${key} muss boolean sein.`);
     }
     if (own(p, "tabIds")) {
       if (!Array.isArray(p.tabIds) || p.tabIds.length < 1 || p.tabIds.length > 100 || p.tabIds.some(id => !Number.isSafeInteger(id) || id < 0 || id > 2147483647) || new Set(p.tabIds).size !== p.tabIds.length) fail("tabIds muss 1–100 eindeutige, nichtnegative Ganzzahlen bis 2147483647 enthalten.");
     }
-    for (const [key, methods] of Object.entries({tabIds: ["get_tabs", "set_muted", "close_tabs", "move_tabs", "discard_tabs", "reload_tabs", "group_tabs", "ungroup_tabs"], tabId: ["update_tab", "read_content"], windowId: ["update_window", "close_window"], groupId: ["update_group", "move_group"], index: ["move_tabs", "move_group"], muted: ["set_muted"]})) {
+    for (const [key, methods] of Object.entries({tabIds: ["get_tabs", "set_muted", "close_tabs", "move_tabs", "discard_tabs", "reload_tabs", "group_tabs", "ungroup_tabs"], tabId: ["update_tab", "read_content", "save_png", "save_html", "save_pdf"], windowId: ["update_window", "close_window"], groupId: ["update_group", "move_group"], index: ["move_tabs", "move_group", "export_chunk"], muted: ["set_muted"], transferId: ["export_chunk", "export_release"]})) {
       if (methods.includes(method) && !own(p, key)) fail(`${key} fehlt.`);
     }
     if (own(p, "url")) {
@@ -68,6 +70,9 @@
     if (own(p, "selector") && (typeof p.selector !== "string" || p.selector.length < 1 || p.selector.length > 4096)) fail("selector muss 1–4096 Zeichen enthalten.");
     if (own(p, "limit") && (p.limit < 1 || p.limit > 500)) fail("limit muss zwischen 1 und 500 liegen.");
     if (own(p, "maxChars") && (p.maxChars < 1 || p.maxChars > 100000)) fail("maxChars muss zwischen 1 und 100000 liegen.");
+    if (own(p, "maxHeight") && (!Number.isInteger(p.maxHeight) || p.maxHeight < 1 || p.maxHeight > 100000)) fail("maxHeight muss zwischen 1 und 100000 liegen.");
+    if (own(p, "transferId") && (typeof p.transferId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(p.transferId))) fail("Ungültige Export-ID.");
+    if (method === "export_chunk" && p.index < 0) fail("Export-Blockindex muss nichtnegativ sein.");
     if (method === "create_tab" && p.index === -1) fail("index muss beim Erstellen eines Tabs nichtnegativ sein.");
     for (const name of ["update_tab", "update_window", "update_group"]) if (method === name && Object.keys(p).length < 2) fail("Mindestens eine Änderung muss angegeben werden.");
   }
@@ -220,6 +225,8 @@
 
   function createService(browser, options = {}) {
     const tracker = new Tracker(browser, options.now);
+    const transfers = globalThis.FirefoxBridgeTransfers?.createTransfers({ now: options.now });
+    const exporting = new Set();
     const ready = tracker.start();
     const groupApi = () => {
       if (!browser.tabGroups || typeof browser.tabs.group !== "function") throw new BridgeError("UNSUPPORTED", "Native Tabgruppen benötigen Firefox 139 oder neuer.");
@@ -246,7 +253,7 @@
         case "status": {
           const permissions = browser.permissions?.getAll ? await browser.permissions.getAll() : {};
           const technicalAllowed = permissions.data_collection?.includes("technicalAndInteraction");
-          return { version: VERSION, connected: true, nativeGroups: Boolean(browser.tabGroups && browser.tabs.group), tracking: "session-tab-values", createdAtSemantics: "Observed onCreated time; pre-existing unknown; restored metadata retained.", discardAttribution: "Only successful discards from this extension can be attributed. Firefox and Auto Tab Discard share discarded state.", ...(technicalAllowed && browser.runtime.getBrowserInfo ? { browser: await browser.runtime.getBrowserInfo() } : {}) };
+          return { version: VERSION, connected: true, nativeGroups: Boolean(browser.tabGroups && browser.tabs.group), exports: { png: Boolean(transfers && globalThis.FirefoxBridgePng && browser.tabs.captureTab), html: Boolean(transfers && globalThis.FirefoxBridgeHtml), pdf: Boolean(globalThis.FirefoxBridgePdf && browser.tabs.saveAsPDF), pdfDestination: "save-dialog" }, tracking: "session-tab-values", createdAtSemantics: "Observed onCreated time; pre-existing unknown; restored metadata retained.", discardAttribution: "Only successful discards from this extension can be attributed. Firefox and Auto Tab Discard share discarded state.", ...(technicalAllowed && browser.runtime.getBrowserInfo ? { browser: await browser.runtime.getBrowserInfo() } : {}) };
         }
         case "get_current": {
           const window = options.contentAccess ? await options.contentAccess.getCurrentWindow() : await browser.windows.getLastFocused({ populate: true, windowTypes: ["normal"] });
@@ -323,6 +330,77 @@
         case "ungroup_tabs": groupApi(); return batch(p.tabIds, async id => { await browser.tabs.ungroup(id); return getTab(id); }, context.assertLive);
         case "update_group": groupApi(); return browser.tabGroups.update(p.groupId, groupFields(p));
         case "move_group": groupApi(); return browser.tabGroups.move(p.groupId, pick(p, ["windowId", "index"]));
+        case "export_chunk": {
+          if (!transfers) throw new BridgeError("EXPORT_UNAVAILABLE", "Aktualisierte Erweiterung neu laden.");
+          const result = await transfers.chunk(p.transferId, p.index);
+          context.assertLive?.(); return result;
+        }
+        case "export_release": return transfers ? transfers.release(p.transferId) : { released: false };
+        case "save_png": case "save_html": case "save_pdf": {
+          let tab = await browser.tabs.get(p.tabId);
+          if (tab.discarded) throw new BridgeError("TAB_DISCARDED", "Tab ist entladen. Vor dem Export ausdrücklich reload_tabs aufrufen.");
+          if (!/^https?:\/\//i.test(tab.url || "")) throw new BridgeError("RESTRICTED_PAGE", "Exporte sind nur für HTTP(S)-Seiten verfügbar.");
+          const authorizedUrl = tab.url, revision = options.contentAccess?.revision, authorization = {};
+          if (options.contentAccess) tab = await options.contentAccess.authorize(tab, authorization);
+          const tabRevision = options.contentAccess?.tabRevisions?.get(p.tabId) || 0;
+          const assertExportLive = () => {
+            context.assertLive?.();
+            const access = options.contentAccess;
+            if (access && access.revision !== revision) throw new BridgeError("PERMISSION_CHANGED", "Die Inhaltsfreigabe wurde während des Exports widerrufen.");
+            if (access?.tabRevisions && (access.tabRevisions.get(p.tabId) || 0) !== tabRevision) throw new BridgeError("PAGE_CHANGED", "Die Seite wurde seit der Inhaltsfreigabe gewechselt.");
+            const grant = access?.authorizations?.get(authorization);
+            if (grant) access.assertGrant(grant, p.tabId, authorizedUrl, revision);
+            else if (access?.settings?.contentMode === "ask-session" && (access.expiresAt === null || access.now() >= access.expiresAt)) throw new BridgeError("SESSION_EXPIRED", "Die Inhaltsfreigabe ist während des Exports abgelaufen.");
+          };
+          const assertAccess = async () => {
+            const current = options.contentAccess
+              ? await options.contentAccess.assertAfterRead(p.tabId, authorizedUrl, revision, authorization)
+              : await browser.tabs.get(p.tabId);
+            if (current.url !== authorizedUrl) throw new BridgeError("PAGE_CHANGED", "Die Seite wurde während des Exports gewechselt.");
+            if (current.discarded) throw new BridgeError("TAB_DISCARDED", "Der Tab wurde während des Exports entladen.");
+          };
+          await assertAccess(); assertExportLive();
+          if (exporting.has(p.tabId)) throw new BridgeError("EXPORT_BUSY", "In diesem Tab läuft bereits ein Export.");
+          exporting.add(p.tabId);
+          try {
+            const module = globalThis[method === "save_png" ? "FirefoxBridgePng" : method === "save_html" ? "FirefoxBridgeHtml" : "FirefoxBridgePdf"];
+            if (!module || (method !== "save_pdf" && !transfers)) throw new BridgeError("EXPORT_UNAVAILABLE", "Aktualisierte Erweiterung mit Export-Unterstützung neu laden.");
+            const exportContext = { assertLive: assertExportLive, assertAccess };
+            // PDF is saved by Firefox's native picker: its completed outcome must not
+            // be erased by a later policy change or represented as an unsaved file.
+            if (method === "save_pdf") return await module.save(browser, tab, exportContext);
+            const result = await module.capture(browser, p.tabId, p, exportContext);
+            await assertAccess(); assertExportLive();
+            let bytes;
+            if (method === "save_html") {
+              if (typeof result.content !== "string") throw new BridgeError("INVALID_EXPORT", "HTML-Export lieferte keinen Seiteninhalt.");
+              const limit = globalThis.FirefoxBridgeTransfers.MAX_BYTES;
+              let byteLength = 0;
+              for (let i = 0; i < result.content.length; i++) {
+                const char = result.content.charCodeAt(i);
+                if (char < 0x80) byteLength++;
+                else if (char < 0x800) byteLength += 2;
+                else if (char >= 0xd800 && char <= 0xdbff && result.content.charCodeAt(i + 1) >= 0xdc00 && result.content.charCodeAt(i + 1) <= 0xdfff) { byteLength += 4; i++; }
+                else byteLength += 3;
+                if (byteLength > limit) throw new BridgeError("EXPORT_TOO_LARGE", "HTML-Export überschreitet 128 MiB.");
+              }
+              bytes = new TextEncoder().encode(result.content);
+            } else {
+              if (typeof result.data !== "string") throw new BridgeError("INVALID_EXPORT", "PNG-Export lieferte keine Bilddaten.");
+              const byteLength = result.data.length / 4 * 3 - (result.data.endsWith("==") ? 2 : result.data.endsWith("=") ? 1 : 0);
+              if (byteLength > globalThis.FirefoxBridgeTransfers.MAX_BYTES) throw new BridgeError("EXPORT_TOO_LARGE", "PNG-Export überschreitet 128 MiB.");
+              bytes = new Uint8Array(byteLength);
+              // Decode in bounded pieces instead of allocating a second full-size
+              // binary string or constructing an intermediate iterable array.
+              let offset = 0;
+              for (let start = 0; start < result.data.length; start += 32768) {
+                const binary = atob(result.data.slice(start, start + 32768));
+                for (let i = 0; i < binary.length; i++) bytes[offset++] = binary.charCodeAt(i);
+              }
+            }
+            return transfers.put(bytes, { tabId: p.tabId, url: authorizedUrl, mimeType: method === "save_png" ? "image/png" : "text/html", ...(method === "save_png" ? pick(result, ["width", "height", "scale", "fullPage"]) : {}), warnings: (result.warnings || []).slice(0, 50).map(warning => String(warning).slice(0, 2000)), untrustedContent: true }, assertAccess);
+          } finally { exporting.delete(p.tabId); }
+        }
         case "read_content": {
           let tab = await browser.tabs.get(p.tabId);
           if (tab.discarded) throw new BridgeError("TAB_DISCARDED", "Tab ist entladen. Erst ausdrücklich reload_tabs aufrufen, dann erneut lesen.");
@@ -345,7 +423,15 @@
         }
       }
     }
-    return { ready, tracker, handle: async (method, params, context) => boundResponse(await handle(method, params, context)) };
+    return { ready, tracker, clearExports: () => transfers?.clear(), handle: async (method, params, context) => {
+      const result = await handle(method, params, context);
+      // Binary blocks must never pass through generic string clipping.
+      if (method === "export_chunk") {
+        if (size(result) > MAX_RESPONSE_BYTES) throw new BridgeError("RESPONSE_TOO_LARGE", "Export-Block überschreitet die Paketgrenze.");
+        return result;
+      }
+      return boundResponse(result);
+    } };
   }
   globalThis.FirefoxBridgeCore = { VERSION, SESSION_KEY, MAX_RESPONSE_BYTES, BridgeError, errorData, validate, Tracker, createService, extractContent, boundResponse };
 })();

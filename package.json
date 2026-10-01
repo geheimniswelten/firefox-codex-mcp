@@ -1,6 +1,6 @@
 {
   "name": "firefox-codex-mcp",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Firefox WebExtension und lokaler MCP-Zugriff fuer Codex",
   "type": "module",
@@ -11,17 +11,21 @@
     "start": "node server/mcp.mjs",
     "test": "node --test test/*.test.mjs",
     "check": "node scripts/check.mjs",
+    "test:firefox-exports": "node scripts/test-exports-firefox.mjs",
+    "build:html-vendor": "node scripts/build-html-vendor.mjs",
     "package": "node scripts/package.mjs",
     "setup": "node scripts/setup.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.2.0",
     "@modelcontextprotocol/server": "2.2.0",
-    "zod": "4.6.5",
     "acorn": "8.18.0",
-    "js-yaml": "4.3.2"
+    "js-yaml": "4.3.2",
+    "zod": "4.6.5"
   },
   "devDependencies": {
+    "esbuild": "0.25.12",
+    "happy-dom": "20.14.5",
     "web-ext": "10.7.0"
   }
 }

@@ -94,3 +94,13 @@ test('content reads have a separate timeout to allow Firefox permission dialogs'
   const bridge = createBridgeClient({ port, token }, { timeoutMs: 25, contentTimeoutMs: 500 });
   assert.deepEqual(await bridge.call('read_content', { tabId: 1 }), { content: 'approved content' });
 });
+
+test('exports have a longer timeout for approval, capture and the native PDF dialog', async t => {
+  const port = await listen(t, (_req, res) => {
+    setTimeout(() => res.end(JSON.stringify({ result: { ready: true } })), 80);
+  });
+  const bridge = createBridgeClient({ port, token }, { timeoutMs: 25, contentTimeoutMs: 25, exportTimeoutMs: 500 });
+  for (const method of ['save_png', 'save_html', 'save_pdf']) assert.deepEqual(await bridge.call(method, { tabId: 1 }), { ready: true });
+  await assert.rejects(bridge.call('export_chunk', { transferId: 'one', index: 0 }), { code: 'BRIDGE_TIMEOUT' });
+  assert.throws(() => createBridgeClient({ port, token }, { exportTimeoutMs: 600001 }), { code: 'INVALID_CONFIG' });
+});

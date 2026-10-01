@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { configPathFromArgs, loadConfig } from './config.mjs';
 import { encodeNativeMessage, NativeDecoder } from './framing.mjs';
 
-const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content']);
+const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','save_png','save_html','save_pdf','export_chunk','export_release']);
 const error = (code, message) => ({ error: { code, message } });
 
 function reply(response, status, body) {
@@ -14,7 +14,8 @@ function reply(response, status, body) {
 }
 
 // This HTTP endpoint is a private IPC bridge, not a network MCP endpoint.
-export function createBridge({ port, token, input = process.stdin, output = process.stdout, timeoutMs = 30_000, contentTimeoutMs = 130_000 }) {
+export function createBridge({ port, token, input = process.stdin, output = process.stdout, timeoutMs = 30_000, contentTimeoutMs = 130_000, exportTimeoutMs = 280_000 }) {
+  if (!Number.isInteger(exportTimeoutMs) || exportTimeoutMs < 1 || exportTimeoutMs > 600_000) throw new Error('Export timeout must be from 1 to 600000 milliseconds.');
   const pending = new Map();
   let ready = false;
   let closed = false;
@@ -57,7 +58,7 @@ export function createBridge({ port, token, input = process.stdin, output = proc
       reply(response, 401, error('UNAUTHORIZED', 'Bridge authentication failed.')); return;
     }
     if (request.method === 'GET' && request.url === '/health') {
-      reply(response, 200, { result: { connected: ready, version: '0.1.2' } }); return;
+      reply(response, 200, { result: { connected: ready, version: '0.1.3' } }); return;
     }
     if (request.method !== 'POST' || request.url !== '/rpc') {
       reply(response, 404, error('NOT_FOUND', 'Unknown bridge endpoint.')); return;
@@ -88,7 +89,7 @@ export function createBridge({ port, token, input = process.stdin, output = proc
       if (response.destroyed || request.aborted) return;
       if (pending.size >= 64) { reply(response, 429, error('BUSY', 'Too many pending requests.')); return; }
       const id = randomUUID();
-      const requestTimeout = body.method === 'read_content' ? contentTimeoutMs : timeoutMs;
+      const requestTimeout = body.method === 'read_content' ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(body.method) ? exportTimeoutMs : timeoutMs;
       const timer = setTimeout(() => {
         pending.delete(id);
         reply(response, 504, error('TIMEOUT', 'Firefox did not respond in time. A mutation may already have run; inspect browser state before retrying.'));

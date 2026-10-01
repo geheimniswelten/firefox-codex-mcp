@@ -1,0 +1,646 @@
+/*
+ * Copyright 2010-2022 Gildas Lormeau
+ * contact : gildas.lormeau <at> gmail.com
+ * 
+ * This file is part of SingleFile.
+ *
+ *   The code in this file is free software: you can redistribute it and/or 
+ *   modify it under the terms of the GNU Affero General Public License 
+ *   (GNU AGPL) as published by the Free Software Foundation, either version 3
+ *   of the License, or (at your option) any later version.
+ * 
+ *   The code in this file is distributed in the hope that it will be useful, 
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of 
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero 
+ *   General Public License for more details.
+ *
+ *   As additional permission under GNU AGPL version 3 section 7, you may 
+ *   distribute UNMODIFIED VERSIONS OF THIS file without the copy of the GNU 
+ *   AGPL normally required by section 4, provided you include this license 
+ *   notice and a URL through which recipients can access the Corresponding 
+ *   Source.
+ */
+
+(() => {
+
+	const LOAD_DEFERRED_CONTENT_START_EVENT = "single-file-load-deferred-content-start";
+	const LOAD_DEFERRED_CONTENT_END_EVENT = "single-file-load-deferred-content-end";
+	const LOAD_DEFERRED_CONTENT_KEEP_ZOOM_LEVEL_START_EVENT = "single-file-load-deferred-content-keep-zoom-level-start";
+	const LOAD_DEFERRED_CONTENT_KEEP_ZOOM_LEVEL_END_EVENT = "single-file-load-deferred-content-keep-zoom-level-end";
+	const LOAD_DEFERRED_CONTENT_RESET_ZOOM_LEVEL_EVENT = "single-file-load-deferred-content-keep-zoom-level-reset";
+	const LOAD_DEFERRED_CONTENT_RESET_EVENT = "single-file-load-deferred-content-reset";
+	const BLOCK_COOKIES_START_EVENT = "single-file-block-cookies-start";
+	const BLOCK_COOKIES_END_EVENT = "single-file-block-cookies-end";
+	const BLOCK_STORAGE_START_EVENT = "single-file-block-storage-start";
+	const BLOCK_STORAGE_END_EVENT = "single-file-block-storage-end";
+	const DISPATCH_SCROLL_START_EVENT = "single-file-dispatch-scroll-event-start";
+	const DISPATCH_SCROLL_END_EVENT = "single-file-dispatch-scroll-event-end";
+	const LAZY_LOAD_ATTRIBUTE = "single-file-lazy-load";
+	const LOAD_IMAGE_EVENT = "single-file-load-image";
+	const IMAGE_LOADED_EVENT = "single-file-image-loaded";
+	const FETCH_SUPPORTED_REQUEST_EVENT = "single-file-request-fetch-supported";
+	const FETCH_SUPPORTED_RESPONSE_EVENT = "single-file-response-fetch-supported";
+	const FETCH_REQUEST_EVENT = "single-file-request-fetch";
+	const FETCH_RESPONSE_EVENT = "single-file-response-fetch";
+	const GET_ADOPTED_STYLESHEETS_REQUEST_EVENT = "single-file-request-get-adopted-stylesheets";
+	const UNREGISTER_GET_ADOPTED_STYLESHEETS_REQUEST_EVENT = "single-file-unregister-request-get-adopted-stylesheets";
+	const GET_ADOPTED_STYLESHEETS_RESPONSE_EVENT = "single-file-response-get-adopted-stylesheets";
+	const NEW_FONT_FACE_EVENT = "single-file-new-font-face";
+	const DELETE_FONT_EVENT = "single-file-delete-font";
+	const CLEAR_FONTS_EVENT = "single-file-clear-fonts";
+	const NEW_WORKLET_EVENT = "single-file-new-worklet";
+	const BOOTSTRAP_EVENT = "single-file-bootstrap";
+	const FONT_STYLE_PROPERTIES = {
+		family: "font-family",
+		ascentOverride: "ascent-override",
+		descentOverride: "descent-override",
+		display: "font-display",
+		featureSettings: "font-feature-settings",
+		lineGapOverride: "line-gap-override",
+		stretch: "font-stretch",
+		style: "font-style",
+		unicodeRange: "unicode-range",
+		variationSettings: "font-variation-settings",
+		weight: "font-weight"
+	};
+
+	const fetch = globalThis.fetch.bind(globalThis);
+	const CustomEvent = globalThis.CustomEvent;
+	const document = globalThis.document;
+	const screen = globalThis.screen;
+	const Element = globalThis.Element;
+	const UIEvent = globalThis.UIEvent;
+	const Event = globalThis.Event;
+	const Uint8Array = globalThis.Uint8Array;
+	const btoa = globalThis.btoa;
+	const JSON = globalThis.JSON;
+	const MutationObserver = globalThis.MutationObserver;
+	const URL = globalThis.URL;
+	const CSSStyleSheet = globalThis.CSSStyleSheet;
+
+	const observers = new Map();
+	const observedElements = new Map();
+
+	let dispatchScrollEvent;
+	let adoptedStylesheetsData = new WeakMap();
+	const shadowRootsData = new WeakMap();
+
+	init();
+	new MutationObserver(init).observe(document, { childList: true });
+
+	function init() {
+		document.addEventListener(LOAD_DEFERRED_CONTENT_START_EVENT, onLoadDeferredContentStart);
+		document.addEventListener(LOAD_DEFERRED_CONTENT_KEEP_ZOOM_LEVEL_START_EVENT, onLoadDeferredContentKeepZoomLevelStart);
+		document.addEventListener(LOAD_DEFERRED_CONTENT_END_EVENT, onLoadDeferredContentEnd);
+		document.addEventListener(LOAD_DEFERRED_CONTENT_KEEP_ZOOM_LEVEL_END_EVENT, onLoadDeferredContentKeepZoomLevelEnd);
+		document.addEventListener(LOAD_DEFERRED_CONTENT_RESET_EVENT, resetScreenSize);
+		document.addEventListener(LOAD_DEFERRED_CONTENT_RESET_ZOOM_LEVEL_EVENT, onLoadDeferredContentResetZoomLevel);
+		document.addEventListener(DISPATCH_SCROLL_START_EVENT, onDispatchScrollStart);
+		document.addEventListener(DISPATCH_SCROLL_END_EVENT, onDispatchScrollEnd);
+		document.addEventListener(BLOCK_COOKIES_START_EVENT, onBlockCookiesStart);
+		document.addEventListener(BLOCK_COOKIES_END_EVENT, onBlockCookiesEnd);
+		document.addEventListener(BLOCK_STORAGE_START_EVENT, onBlockStorageStart);
+		document.addEventListener(BLOCK_STORAGE_END_EVENT, onBlockStorageEnd);
+		document.addEventListener(FETCH_SUPPORTED_REQUEST_EVENT, onFetchSupportedRequest);
+		document.addEventListener(FETCH_REQUEST_EVENT, onFetchRequest);
+		document.addEventListener(GET_ADOPTED_STYLESHEETS_REQUEST_EVENT, getAdoptedStylesheetsListener);
+		document.addEventListener(BOOTSTRAP_EVENT, onBootstrap);
+	}
+
+	function onLoadDeferredContentStart(event) {
+		loadDeferredContentStart(false, getMinZoomFactor(event));
+	}
+
+	function onLoadDeferredContentKeepZoomLevelStart(event) {
+		loadDeferredContentStart(true, getMinZoomFactor(event));
+	}
+
+	function getMinZoomFactor(event) {
+		try {
+			const { minZoomFactor } = JSON.parse(event.detail);
+			return minZoomFactor > 0 && minZoomFactor <= 1 ? minZoomFactor : 0;
+			// eslint-disable-next-line no-unused-vars
+		} catch (error) {
+			return 0;
+		}
+	}
+
+	function onLoadDeferredContentEnd() {
+		loadDeferredContentEnd();
+	}
+
+	function onLoadDeferredContentKeepZoomLevelEnd() {
+		loadDeferredContentEnd(true);
+	}
+
+	function onLoadDeferredContentResetZoomLevel() {
+		const transform = document.documentElement.style.getPropertyValue("-sf-transform");
+		const transformPriority = document.documentElement.style.getPropertyPriority("-sf-transform");
+		const transformOrigin = document.documentElement.style.getPropertyValue("-sf-transform-origin");
+		const transformOriginPriority = document.documentElement.style.getPropertyPriority("-sf-transform-origin");
+		const minHeight = document.documentElement.style.getPropertyValue("-sf-min-height");
+		const minHeightPriority = document.documentElement.style.getPropertyPriority("-sf-min-height");
+		document.documentElement.style.setProperty("transform", transform, transformPriority);
+		document.documentElement.style.setProperty("transform-origin", transformOrigin, transformOriginPriority);
+		document.documentElement.style.setProperty("min-height", minHeight, minHeightPriority);
+		document.documentElement.style.removeProperty("-sf-transform");
+		document.documentElement.style.removeProperty("-sf-transform-origin");
+		document.documentElement.style.removeProperty("-sf-min-height");
+		resetScreenSize();
+	}
+
+	function onDispatchScrollStart() {
+		dispatchScrollEvent = true;
+	}
+
+	function onDispatchScrollEnd() {
+		dispatchScrollEvent = false;
+	}
+
+	function onBlockCookiesStart() {
+		try {
+			document.__defineGetter__("cookie", () => { throw new Error("document.cookie temporary blocked by SingleFile"); });
+			// eslint-disable-next-line no-unused-vars
+		} catch (error) {
+			// ignored
+		}
+	}
+
+	function onBlockCookiesEnd() {
+		delete document.cookie;
+	}
+
+	function onBlockStorageStart() {
+		if (!globalThis._singleFile_localStorage) {
+			globalThis._singleFile_localStorage = globalThis.localStorage;
+			globalThis.__defineGetter__("localStorage", () => { throw new Error("localStorage temporary blocked by SingleFile"); });
+		}
+		if (!globalThis._singleFile_indexedDB) {
+			globalThis._singleFile_indexedDB = globalThis.indexedDB;
+			globalThis.__defineGetter__("indexedDB", () => { throw new Error("indexedDB temporary blocked by SingleFile"); });
+		}
+	}
+
+	function onBlockStorageEnd() {
+		if (globalThis._singleFile_localStorage) {
+			delete globalThis.localStorage;
+			globalThis.localStorage = globalThis._singleFile_localStorage;
+			delete globalThis._singleFile_localStorage;
+		}
+		if (!globalThis._singleFile_indexedDB) {
+			delete globalThis.indexedDB;
+			globalThis.indexedDB = globalThis._singleFile_indexedDB;
+			delete globalThis._singleFile_indexedDB;
+		}
+	}
+
+	function onFetchSupportedRequest() {
+		document.dispatchEvent(new CustomEvent(FETCH_SUPPORTED_RESPONSE_EVENT));
+	}
+
+	async function onFetchRequest(event) {
+		const { url, options } = JSON.parse(event.detail);
+		let detail;
+		try {
+			const response = await fetch(url, options);
+			detail = { url, response: await response.arrayBuffer(), headers: [...response.headers], status: response.status };
+		} catch (error) {
+			detail = { url, error: error && (error.message || error.toString()) };
+		}
+		document.dispatchEvent(new CustomEvent(FETCH_RESPONSE_EVENT, { detail }));
+	}
+
+	function onBootstrap(event) {
+		try {
+			if (globalThis.bootstrap && event.detail.data) {
+				globalThis.bootstrap(event.detail.data);
+			}
+			// eslint-disable-next-line no-unused-vars
+		} catch (error) {
+			// ignored
+		}
+	}
+
+	function loadDeferredContentStart(keepZoomLevel, minZoomFactor) {
+		const scrollingElement = document.scrollingElement || document.documentElement;
+		const clientHeight = scrollingElement.clientHeight;
+		const clientWidth = scrollingElement.clientWidth;
+		const maxScrollY = Math.max(scrollingElement.scrollHeight - clientHeight, clientHeight);
+		const maxScrollX = Math.max(scrollingElement.scrollWidth - clientWidth, clientWidth);
+		document.querySelectorAll("[loading=lazy]").forEach(element => {
+			element.loading = "eager";
+			element.setAttribute(LAZY_LOAD_ATTRIBUTE, "");
+		});
+		scrollingElement.__defineGetter__("clientHeight", () => maxScrollY);
+		scrollingElement.__defineGetter__("clientWidth", () => maxScrollX);
+		screen.__defineGetter__("height", () => maxScrollY);
+		screen.__defineGetter__("width", () => maxScrollX);
+		globalThis._singleFile_innerHeight = globalThis.innerHeight;
+		globalThis._singleFile_innerWidth = globalThis.innerWidth;
+		globalThis.__defineGetter__("innerHeight", () => maxScrollY);
+		globalThis.__defineGetter__("innerWidth", () => maxScrollX);
+		if (!keepZoomLevel) {
+			if (!globalThis._singleFile_getBoundingClientRect) {
+				globalThis._singleFile_getBoundingClientRect = Element.prototype.getBoundingClientRect;
+				Element.prototype.getBoundingClientRect = function () {
+					const boundingRect = globalThis._singleFile_getBoundingClientRect.call(this);
+					if (this == scrollingElement) {
+						boundingRect.__defineGetter__("height", () => maxScrollY);
+						boundingRect.__defineGetter__("bottom", () => maxScrollY + boundingRect.top);
+						boundingRect.__defineGetter__("width", () => maxScrollX);
+						boundingRect.__defineGetter__("right", () => maxScrollX + boundingRect.left);
+					}
+					return boundingRect;
+				};
+				Element.prototype.getBoundingClientRect.toString = function () { return "function getBoundingClientRect() { [native code] }"; };
+				setFunctionName(Element.prototype.getBoundingClientRect, "getBoundingClientRect");
+			}
+		}
+		if (!globalThis._singleFileImage) {
+			const NativeImage = globalThis.Image;
+			globalThis._singleFileImage = NativeImage;
+			const ImageWrapper = function Image() {
+				const image = new NativeImage(...arguments);
+				const result = new NativeImage(...arguments);
+				result.__defineSetter__("src", value => {
+					image.src = value;
+					document.dispatchEvent(new CustomEvent(LOAD_IMAGE_EVENT, { detail: image.src }));
+				});
+				result.__defineGetter__("src", () => image.src);
+				result.__defineSetter__("srcset", value => {
+					document.dispatchEvent(new CustomEvent(LOAD_IMAGE_EVENT));
+					image.srcset = value;
+				});
+				result.__defineGetter__("srcset", () => image.srcset);
+				result.__defineGetter__("height", () => image.height);
+				result.__defineGetter__("width", () => image.width);
+				result.__defineGetter__("naturalHeight", () => image.naturalHeight);
+				result.__defineGetter__("naturalWidth", () => image.naturalWidth);
+				if (image.decode) {
+					const decode = function decode() { return image.decode(); };
+					decode.toString = function () { return "function decode() { [native code] }"; };
+					setFunctionName(decode, "decode");
+					result.__defineGetter__("decode", () => decode);
+				}
+				image.onload = image.onloadend = image.onerror = event => {
+					document.dispatchEvent(new CustomEvent(IMAGE_LOADED_EVENT, { detail: image.src }));
+					result.dispatchEvent(new Event(event.type, event));
+				};
+				return result;
+			};
+			ImageWrapper.prototype = NativeImage.prototype;
+			ImageWrapper.toString = function () { return "function Image() { [native code] }"; };
+			setFunctionName(ImageWrapper, "Image");
+			globalThis.__defineGetter__("Image", () => ImageWrapper);
+		}
+		const verticalZoomFactor = clientHeight / maxScrollY;
+		const horizontalZoomFactor = clientWidth / maxScrollX;
+		const zoomFactor = Math.max(Math.min(verticalZoomFactor, horizontalZoomFactor), minZoomFactor || 0);
+		const scrollPosition = { x: globalThis.scrollX, y: globalThis.scrollY };
+		if (zoomFactor < 1) {
+			const transform = document.documentElement.style.getPropertyValue("transform");
+			const transformPriority = document.documentElement.style.getPropertyPriority("transform");
+			const transformOrigin = document.documentElement.style.getPropertyValue("transform-origin");
+			const transformOriginPriority = document.documentElement.style.getPropertyPriority("transform-origin");
+			const minHeight = document.documentElement.style.getPropertyValue("min-height");
+			const minHeightPriority = document.documentElement.style.getPropertyPriority("min-height");
+			const horizontalOrigin = horizontalZoomFactor < 1 ? "0" : "50%";
+			const translation = "translate(" + (horizontalOrigin == "0" ? scrollPosition.x : 0) + "px, " + scrollPosition.y + "px) ";
+			document.documentElement.style.setProperty("transform-origin", horizontalOrigin + " 0 0", "important");
+			document.documentElement.style.setProperty("transform", translation + "scale3d(" + zoomFactor + ", " + zoomFactor + ", 1)", "important");
+			document.documentElement.style.setProperty("min-height", (100 / zoomFactor) + "vh", "important");
+			dispatchResizeEvent();
+			if (keepZoomLevel) {
+				document.documentElement.style.setProperty("-sf-transform", transform, transformPriority);
+				document.documentElement.style.setProperty("-sf-transform-origin", transformOrigin, transformOriginPriority);
+				document.documentElement.style.setProperty("-sf-min-height", minHeight, minHeightPriority);
+			} else {
+				document.documentElement.style.setProperty("transform", transform, transformPriority);
+				document.documentElement.style.setProperty("transform-origin", transformOrigin, transformOriginPriority);
+				document.documentElement.style.setProperty("min-height", minHeight, minHeightPriority);
+			}
+		}
+		if (!keepZoomLevel) {
+			dispatchResizeEvent();
+			const docBoundingRect = scrollingElement.getBoundingClientRect();
+			if (globalThis.window == globalThis.window.top) {
+				[...observers].forEach(([intersectionObserver, observer]) => {
+					const getBoundingClientRectDefined = observer.options && observer.options.root && observer.options.root.getBoundingClientRect;
+					const rootBoundingRect = getBoundingClientRectDefined && observer.options.root.getBoundingClientRect();
+					const targetElements = observedElements.get(intersectionObserver);
+					if (targetElements) {
+						const params = targetElements.map(target => {
+							const boundingClientRect = target.getBoundingClientRect();
+							const isIntersecting = true;
+							const intersectionRatio = 1;
+							const rootBounds = getBoundingClientRectDefined ? rootBoundingRect : docBoundingRect;
+							const time = 0;
+							return { target, intersectionRatio, boundingClientRect, intersectionRect: boundingClientRect, isIntersecting, rootBounds, time };
+						}).filter(params => params.boundingClientRect.width && params.boundingClientRect.height > 1);
+						if (params.length) {
+							observer.callback.call(intersectionObserver, params, intersectionObserver);
+						}
+					}
+				});
+			}
+		}
+	}
+
+	function loadDeferredContentEnd(keepZoomLevel) {
+		document.querySelectorAll("[" + LAZY_LOAD_ATTRIBUTE + "]").forEach(element => {
+			element.loading = "lazy";
+			element.removeAttribute(LAZY_LOAD_ATTRIBUTE);
+		});
+		if (!keepZoomLevel) {
+			if (globalThis._singleFile_getBoundingClientRect) {
+				Element.prototype.getBoundingClientRect = globalThis._singleFile_getBoundingClientRect;
+				delete globalThis._singleFile_getBoundingClientRect;
+			}
+		}
+		if (globalThis._singleFileImage) {
+			delete globalThis.Image;
+			globalThis.Image = globalThis._singleFileImage;
+			delete globalThis._singleFileImage;
+		}
+		if (!keepZoomLevel) {
+			resetScreenSize();
+			dispatchResizeEvent();
+		}
+	}
+
+	function resetScreenSize() {
+		const scrollingElement = document.scrollingElement || document.documentElement;
+		if (globalThis._singleFile_innerHeight != null) {
+			delete globalThis.innerHeight;
+			globalThis.innerHeight = globalThis._singleFile_innerHeight;
+			delete globalThis._singleFile_innerHeight;
+		}
+		if (globalThis._singleFile_innerWidth != null) {
+			delete globalThis.innerWidth;
+			globalThis.innerWidth = globalThis._singleFile_innerWidth;
+			delete globalThis._singleFile_innerWidth;
+		}
+		delete scrollingElement.clientHeight;
+		delete scrollingElement.clientWidth;
+		delete screen.height;
+		delete screen.width;
+	}
+
+	if (globalThis.CSS && globalThis.CSS.paintWorklet && globalThis.CSS.paintWorklet.addModule) {
+		const addModule = globalThis.CSS.paintWorklet.addModule;
+		globalThis.CSS.paintWorklet.addModule = function (moduleURL) {
+			try {
+				const result = addModule.apply(globalThis.CSS.paintWorklet, arguments);
+				const options = arguments[1];
+				moduleURL = new URL(moduleURL, document.baseURI).href;
+				document.dispatchEvent(new CustomEvent(NEW_WORKLET_EVENT, { detail: { moduleURL, options } }));
+				return result;
+			} catch (error) {
+				error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+				throw error;
+			}
+		};
+		globalThis.CSS.paintWorklet.addModule.toString = function () { return "function addModule() { [native code] }"; };
+		setFunctionName(globalThis.CSS.paintWorklet.addModule, "addModule");
+	}
+
+	if (globalThis.FontFace) {
+		const origFontFace = globalThis.FontFace;
+		globalThis.FontFace = function FontFace(family, source, ...args) {
+			try {
+				if (!new.target) {
+					return origFontFace();
+				}
+				getDetailObject(family, source, ...args).then(detail => document.dispatchEvent(new CustomEvent(NEW_FONT_FACE_EVENT, { detail })));
+				return new origFontFace(family, source, ...args);
+			} catch (error) {
+				error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+				throw error;
+			}
+		};
+		globalThis.FontFace.prototype = origFontFace.prototype;
+		globalThis.FontFace.toString = function () { return "function FontFace() { [native code] }"; };
+		setFunctionName(globalThis.FontFace, "FontFace");
+		const deleteFont = document.fonts.delete;
+		document.fonts.delete = function (fontFace) {
+			try {
+				getDetailObject(fontFace.family).then(detail => document.dispatchEvent(new CustomEvent(DELETE_FONT_EVENT, { detail })));
+				return deleteFont.call(document.fonts, fontFace);
+			} catch (error) {
+				error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+				throw error;
+			}
+		};
+		document.fonts.delete.toString = function () { return "function delete() { [native code] }"; };
+		setFunctionName(document.fonts.delete, "delete");
+		const clearFonts = document.fonts.clear;
+		document.fonts.clear = function () {
+			try {
+				document.dispatchEvent(new CustomEvent(CLEAR_FONTS_EVENT));
+				return clearFonts.call(document.fonts);
+			} catch (error) {
+				error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+				throw error;
+			}
+		};
+		document.fonts.clear.toString = function () { return "function clear() { [native code] }"; };
+		setFunctionName(document.fonts.clear, "clear");
+	}
+
+	if (globalThis.IntersectionObserver) {
+		const origIntersectionObserver = globalThis.IntersectionObserver;
+		globalThis.IntersectionObserver = function IntersectionObserver(callback) {
+			try {
+				const intersectionObserver = new origIntersectionObserver(...arguments);
+				const observeIntersection = origIntersectionObserver.prototype.observe || intersectionObserver.observe;
+				const unobserveIntersection = origIntersectionObserver.prototype.unobserve || intersectionObserver.unobserve;
+				const options = arguments[1];
+				if (observeIntersection) {
+					intersectionObserver.observe = function (targetElement) {
+						try {
+							let targetElements = observedElements.get(intersectionObserver);
+							if (!targetElements) {
+								targetElements = [];
+								observedElements.set(intersectionObserver, targetElements);
+							}
+							targetElements.push(targetElement);
+							return observeIntersection.call(intersectionObserver, targetElement);
+						} catch (error) {
+							error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+							throw error;
+						}
+					};
+					intersectionObserver.observe.toString = function () { return "function observe() { [native code] }"; };
+					setFunctionName(intersectionObserver.observe, "observe");
+				}
+				if (unobserveIntersection) {
+					intersectionObserver.unobserve = function (targetElement) {
+						try {
+							let targetElements = observedElements.get(intersectionObserver);
+							if (targetElements) {
+								targetElements = targetElements.filter(element => element != targetElement);
+								if (targetElements.length) {
+									observedElements.set(intersectionObserver, targetElements);
+								} else {
+									observedElements.delete(intersectionObserver);
+									observers.delete(intersectionObserver);
+								}
+							}
+							return unobserveIntersection.call(intersectionObserver, targetElement);
+						} catch (error) {
+							error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+							throw error;
+						}
+					};
+					intersectionObserver.unobserve.toString = function () { return "function unobserve() { [native code] }"; };
+					setFunctionName(intersectionObserver.unobserve, "unobserve");
+				}
+				observers.set(intersectionObserver, { callback, options });
+				return intersectionObserver;
+			} catch (error) {
+				error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+				throw error;
+			}
+		};
+		globalThis.IntersectionObserver.prototype = origIntersectionObserver.prototype;
+		globalThis.IntersectionObserver.toString = function () { return "function IntersectionObserver() { [native code] }"; };
+		setFunctionName(globalThis.IntersectionObserver, "IntersectionObserver");
+	}
+
+	const originalReplaceSync = CSSStyleSheet.prototype.replaceSync;
+	CSSStyleSheet.prototype.replaceSync = function (text) {
+		try {
+			const result = originalReplaceSync.apply(this, [text]);
+			adoptedStylesheetsData.set(this, text);
+			return result;
+		} catch (error) {
+			error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+			throw error;
+		}
+	};
+	CSSStyleSheet.prototype.replaceSync.toString = function () { return "function replaceSync() { [native code] }"; };
+	setFunctionName(CSSStyleSheet.prototype.replaceSync, "replaceSync");
+	const orginalReplace = CSSStyleSheet.prototype.replace;
+	CSSStyleSheet.prototype.replace = async function (text) {
+		try {
+			const result = await orginalReplace.apply(this, [text]);
+			adoptedStylesheetsData.set(this, text);
+			return result;
+		} catch (error) {
+			error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+			throw error;
+		}
+	};
+	CSSStyleSheet.prototype.replace.toString = function () { return "function replace() { [native code] }"; };
+	setFunctionName(CSSStyleSheet.prototype.replace, "replace");
+	const originalInsertRule = CSSStyleSheet.prototype.insertRule;
+	CSSStyleSheet.prototype.insertRule = function (rule) {
+		try {
+			const result = originalInsertRule.apply(this, [rule, arguments[1]]);
+			adoptedStylesheetsData.delete(this);
+			return result;
+		} catch (error) {
+			error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+			throw error;
+		}
+	};
+	CSSStyleSheet.prototype.insertRule.toString = function () { return "function insertRule() { [native code] }"; };
+	setFunctionName(CSSStyleSheet.prototype.insertRule, "insertRule");
+	const originalDeleteRule = CSSStyleSheet.prototype.deleteRule;
+	CSSStyleSheet.prototype.deleteRule = function (index) {
+		try {
+			const result = originalDeleteRule.apply(this, [index]);
+			adoptedStylesheetsData.delete(this);
+			return result;
+		} catch (error) {
+			error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+			throw error;
+		}
+	};
+	CSSStyleSheet.prototype.deleteRule.toString = function () { return "function deleteRule() { [native code] }"; };
+	setFunctionName(CSSStyleSheet.prototype.deleteRule, "deleteRule");
+
+	// the listener below is reached through the host element, and a closed shadow root is
+	// not reachable from it, so the roots are recorded as they are created
+	const originalAttachShadow = Element.prototype.attachShadow;
+	Element.prototype.attachShadow = function (init) {
+		try {
+			const shadowRoot = originalAttachShadow.apply(this, [init]);
+			shadowRootsData.set(this, shadowRoot);
+			return shadowRoot;
+		} catch (error) {
+			error.stack = error.message + "\n" + "    \n" + error.stack.trim().split("\n").slice(-1).join("\n");
+			throw error;
+		}
+	};
+	Element.prototype.attachShadow.toString = function () { return "function attachShadow() { [native code] }"; };
+	setFunctionName(Element.prototype.attachShadow, "attachShadow");
+
+	function getAdoptedStylesheetsListener(event) {
+		const shadowRoot = event.target.shadowRoot || shadowRootsData.get(event.target);
+		event.stopPropagation();
+		if (shadowRoot) {
+			shadowRoot.addEventListener(GET_ADOPTED_STYLESHEETS_REQUEST_EVENT, getAdoptedStylesheetsListener, { capture: true });
+			shadowRoot.addEventListener(UNREGISTER_GET_ADOPTED_STYLESHEETS_REQUEST_EVENT, unregisterGetAdoptedStylesheetsListener, { once: true });
+			const adoptedStyleSheets = Array.from(shadowRoot.adoptedStyleSheets).map(stylesheet => {
+				if (adoptedStylesheetsData.has(stylesheet)) {
+					return adoptedStylesheetsData.get(stylesheet);
+				} else {
+					const text = Array.from(stylesheet.cssRules).map(cssRule => cssRule.cssText).join("\n");
+					adoptedStylesheetsData.set(stylesheet, text);
+					return text;
+				}
+			});
+			if (adoptedStyleSheets.length) {
+				shadowRoot.dispatchEvent(new CustomEvent(GET_ADOPTED_STYLESHEETS_RESPONSE_EVENT, { detail: { adoptedStyleSheets } }));
+			}
+		}
+	}
+
+	// the root is read from the event rather than captured, so one function serves every shadow root:
+	// a closure per root would be a distinct callback each time and would accumulate instead of being
+	// the no-op that re-adding an already registered listener is. The capture flag has to be repeated
+	// here because it is part of what identifies the listener to remove
+	function unregisterGetAdoptedStylesheetsListener(event) {
+		event.currentTarget.removeEventListener(GET_ADOPTED_STYLESHEETS_REQUEST_EVENT, getAdoptedStylesheetsListener, { capture: true });
+	}
+
+	async function getDetailObject(fontFamily, src, descriptors) {
+		const detail = {};
+		detail["font-family"] = fontFamily;
+		detail.src = src;
+		if (descriptors) {
+			Object.keys(descriptors).forEach(descriptor => {
+				if (FONT_STYLE_PROPERTIES[descriptor]) {
+					detail[FONT_STYLE_PROPERTIES[descriptor]] = descriptors[descriptor];
+				}
+			});
+		}
+		if (detail.src instanceof ArrayBuffer) {
+			const bytes = new Uint8Array(detail.src);
+			let content = "";
+			for (let offset = 0; offset < bytes.length; offset += 8192) {
+				content += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+			}
+			detail.src = "url(data:application/octet-stream;base64," + btoa(content) + ")";
+		}
+		return detail;
+	}
+
+	function setFunctionName(fn, name) {
+		Object.defineProperty(fn, "name", { value: name, configurable: true });
+	}
+
+	function dispatchResizeEvent() {
+		try {
+			globalThis.dispatchEvent(new UIEvent("resize"));
+			if (dispatchScrollEvent) {
+				globalThis.dispatchEvent(new UIEvent("scroll"));
+			}
+			// eslint-disable-next-line no-unused-vars
+		} catch (error) {
+			// ignored
+		}
+	}
+
+})();

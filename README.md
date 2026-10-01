@@ -1,19 +1,24 @@
 ### Kurz
 
-- Firefox mit KI verwalten (Tabs/Fenster/Plugins suchen/durchsuchen/schließen/verschieben/...)
+- Firefox mit KI verwalten: Tabs/Fenster/Plugins suchen/durchsuchen/schließen/verschieben/...
    - Codex, Claude Code (CLI / VS Code), Claude Desktop, Eigent, Gemini CLI / Code Assist, Gemini Desktop, Hermes, LM Studio and OpenClaw
 - **ACHTUNG:** derzeit im Testmodus, nur als temporäres Add-on
 - Downloaden und install.cmd ausführen
    - in about:debugging#/runtime/this-firefox "Temporäres Add-on laden" -> ...\firefox-codex-mcp\extension\manifest.json
-   - als FF-Plugin, online, zum Direktinstallieren, aktuell noch nicht (aus Firefox heraus ist eine Registrierung bei den KI-Agenten sowieso nicht möglich)
+   - als FF-Plugin, online, zum direkt Installieren, aktuell noch nicht (aus Firefox heraus ist eine Registrierung bei den KI-Agenten sowieso nicht möglich)
 - Windows + Firefox _(FF im OSX und Linux prinzipiell möglich, also Plugin inkl. MCP-Server, aber erstellen und registrieren aktuell manuell)_
 - Zugriff auf Seiteninhalte standardmäßig gesperrt (bei Erstzugriff wird nach Freigabe gefragt)
+- Export von Webseiten als PNG und Single-HTML (auch als PDF -> öffnet aber nur den Speichern-Dialog des FF)
 
 # Firefox ↔ Codex MCP
 
 Firefox-Erweiterung und lokaler MCP-Server für die vorhandenen Firefox-Fenster, Tabs, nativen Tabgruppen, installierten Erweiterungen und Seiteninhalte. Die Verbindung nutzt Firefox Native Messaging, einen ausschließlich an `127.0.0.1` gebundenen Host mit Zugriffstoken und MCP über Standard-Ein-/Ausgabe. Es ist kein OpenAI-API-Schlüssel nötig.
 
+Ist die Erweiterung bzw. MCP-Anbindung registriert, aber nicht aktiv oder erreichbar, soll der KI-Agent zuerst rückfragen: auf die Verbindung warten oder `about:debugging#/runtime/this-firefox` in Firefox öffnen, um das Add-on zu laden bzw. neu zu laden? Nach der Prüfung durch den Nutzer wird `firefox_status` erneut aufgerufen. Computer Use oder andere Browser-Automatisierung sind erst nach erfolgloser Wiederherstellung oder auf ausdrücklichen Wunsch des Nutzers vorgesehen. Diese Reihenfolge steht in den MCP-Server-Anweisungen sowie in der `FIREFOX_OFFLINE`-Fehlermeldung. Ist der MCP-Server selbst nicht gestartet und kann keine Anweisungen liefern, muss der KI-Client diese Vorgabe aus einer zuvor geladenen Anweisung kennen. Die Debugging-Seite wird über eine verfügbare Browser-/Betriebssystemfunktion geöffnet, da die nicht erreichbare MCP-Verbindung das nicht übernehmen kann.
+
 ## Voraussetzungen
+
+Der optionale Skill `skills/firefox-browser/SKILL.md` bevorzugt Firefox auch bei allgemeinen Bezeichnungen wie „Browser“ und „Webbrowser“. Eine ausdrücklich andere Browserauswahl (z. B. Chrome oder Edge) hat Vorrang. Für Codex den Ordner `skills/firefox-browser` nach `%USERPROFILE%\.codex\skills\firefox-browser` kopieren (bei gesetztem `CODEX_HOME` in dessen `skills`-Verzeichnis). Der Skill enthält den Wiederherstellungsablauf auch für den Fall, dass der MCP-Server selbst nicht erreichbar ist. Er wird dadurch unabhängig von den Server-Anweisungen auffindbar.
 
 - Desktop-Firefox **140 oder neuer** für native Tabgruppen und die aktuelle Firefox-Datenfreigabe bei der Installation.
 - **Node.js 22 oder neuer** einschließlich npm. Der Windows-Installer verwendet eine passende vorhandene Installation oder richtet automatisch Node 24 LTS samt npm unter `.runtime/node` im Projekt ein. Eine vorherige systemweite Node-Installation ist damit nicht erforderlich.
@@ -107,11 +112,11 @@ Im Sitzungsmodus gilt eine solche Freigabe ausschließlich für **diesen Tab und
 
 **„Temporäre Freigaben zurücksetzen“** widerruft alle aktiven Sitzungs- und Tabfreigaben sofort und lehnt eine offene Freigabefrage ab. Die gewählten Inhaltsregeln bleiben erhalten; die nächste Anfrage fragt entsprechend diesen Regeln erneut.
 
-Diese Regeln betreffen das Lesen der Seite; das Auflisten von Tab-Metadaten und die ausdrücklich angeforderte Tabsteuerung bleiben bei aktivem MCP möglich. Entladene Tabs werden durch Inhaltslesen nicht aufgeweckt.
+Diese Regeln betreffen das Lesen und Exportieren der Seite; das Auflisten von Tab-Metadaten und die ausdrücklich angeforderte Tabsteuerung bleiben bei aktivem MCP möglich. Entladene Tabs werden durch Inhaltslesen oder Exportieren nicht aufgeweckt.
 
 ## Werkzeuge
 
-Alle 22 Werkzeugnamen haben das Präfix `firefox_`:
+Alle 25 Werkzeugnamen haben das Präfix `firefox_`:
 
 | Bereich | Namen ohne Präfix |
 | --- | --- |
@@ -121,10 +126,32 @@ Alle 22 Werkzeugnamen haben das Präfix `firefox_`:
 | Fenster | `create_window`, `update_window`, `close_window` |
 | Native Gruppen | `list_groups`, `group_tabs`, `ungroup_tabs`, `update_group`, `move_group` |
 | Seiteninhalt | `read_content` |
+| Seitenexport | `save_png`, `save_html`, `save_pdf` |
 
 Beispiele für Codex: „Liste alle entladenen Firefox-Tabs“, „Schalte diese drei Tabs stumm“, „Verschiebe die ausgewählten Tabs in ein neues Fenster“, „Fasse den Inhalt des aktiven Tabs zusammen“. IDs zunächst anhand der Übersicht auflösen. `list_tabs` unterstützt Fenster, Aktivität, Audio, Stummschaltung, Entladezustand und Gruppe als Filter; Standard sind 100, maximal 500 Tabs pro Seite mit `offset`/`limit`.
 
 `read_content` liefert Text oder HTML aus dem Hauptframe, optional für einen CSS-Selektor und mit Links. Standardlimit: 30.000 Zeichen; Maximum: 100.000. Kürzungen werden angezeigt. Schließen, Navigation, Neuladen und Entladen können ungespeicherte Seitendaten verlieren. Batch-Aktionen liefern Einzelergebnisse und können teilweise erfolgreich sein; nach einem Timeout oder Teilfehler zunächst Zustand prüfen, bevor erneut verändert wird. Parameterdetails stehen in `PROTOCOL.md` und den MCP-Werkzeugschemata.
+
+## Seiten als PNG, einzelne HTML-Datei oder PDF speichern
+
+Die drei Exportwerkzeuge verwenden dieselben Inhaltsfreigaben wie `read_content`. Die Tab-ID zunächst über `firefox_get_current` oder `firefox_list_tabs` ermitteln. PNG und HTML werden im Dateisystem des Rechners gespeichert, auf dem der lokale MCP-Server läuft. Dafür einen vollständigen absoluten Zielpfad in einem vorhandenen Ordner angeben. Vorhandene Dateien werden nicht überschrieben. Ein Export über **128 MiB** schlägt fehl, statt unbemerkt gekürzt zu werden; eine unvollständige neu angelegte Datei wird bei einem Fehler entfernt.
+
+```javascript
+firefox_save_png({tabId: 123, path: "C:\\Exports\\seite.png"})
+firefox_save_png({tabId: 123, path: "C:\\Exports\\ausschnitt.png", fullPage: false})
+firefox_save_html({tabId: 123, path: "C:\\Exports\\seite.html"})
+firefox_save_pdf({tabId: 123})
+```
+
+**PNG:** Standardmäßig wird die gesamte Seite von oben bis unten in der aktuellen Breite des Tabs aufgenommen. `fullPage:false` nimmt nur den sichtbaren Ausschnitt auf. Die Aufnahme verwendet einen Bildpixel je CSS-Pixel. `loadDeferred:true` ist Standard: Ein Scroll-Durchlauf von höchstens 20 Sekunden beziehungsweise 150 Schritten versucht zuerst, nachgeladene Inhalte zu laden, und stellt anschließend die vorherige Scrollposition wieder her. Die Seite kann dabei eigene Nachladeaktionen ausführen. Mit `loadDeferred:false` wird dieser Durchlauf ausgelassen. `maxHeight` begrenzt die Aufnahme auf standardmäßig **30.000 CSS-Pixel**; bis **100.000** sind ausdrücklich einstellbar. Zusätzlich gelten technische Bildgrenzen von **32.760 Pixeln je Kante** und **100 Millionen Bildpunkten**. Bei Überschreitung meldet das Werkzeug einen Fehler. Endlos nachladende Seiten, virtuelle Listen und eigene Scrollbereiche können nicht vollständig garantiert werden; die Antwort meldet entsprechende Einschränkungen unter `warnings`.
+
+**Eine HTML-Datei:** Die Erweiterung enthält eine fest mitgelieferte Version von **SingleFile Core 1.6.19** einschließlich Quellcode und Lizenz; zur Aufnahme wird kein externer Speicherdienst aufgerufen. Gespeichert wird der aktuelle, bereits durch JavaScript aufgebaute DOM-Zustand; unterstützte CSS-, Bild- und Schriftressourcen werden in die Datei eingebettet. Zugängliche Canvas-Inhalte, Shadow DOM und Frames werden soweit möglich übernommen. JavaScript, Ereignishandler und `javascript:`-URLs werden auch aus eingebetteten Dokumenten und Templates entfernt. Eine CSP in der Kopie sperrt Skriptausführung und weitere Ressourcenabrufe. CSS-Animationen werden auf ihren aktuellen Zustand eingefroren; Medien erhalten eine statische Darstellung.
+
+Normale Links bleiben als vollständige URLs erhalten; lokale Sprungmarken bleiben lokal. Erkennbare einfache JavaScript-Navigationen mit einem festen Ziel werden in normale Links umgewandelt, etwa `location.href='/details/123'` oder `location.assign('/details/123')`. Beliebige JS-Schaltflächen und Anwendungen funktionieren in der Kopie nicht weiter. Auch hier ist `loadDeferred:true` Standard; der vorbereitende Scroll-Durchlauf ist auf acht Sekunden beziehungsweise 100 Schritte und 100.000 CSS-Pixel begrenzt. Die HTML-Aufnahme dauert höchstens 60 Sekunden und lädt Ressourcen bis 12 MiB pro Ressource beziehungsweise insgesamt 64 MiB nach. Die Antwort nennt unter `warnings` fehlende, zu große oder nicht vollständig übernommene Ressourcen und Seitenelemente. Geschützte Frames, DRM-Inhalte und geschlossene Shadow Roots können unvollständig bleiben. HTML kann bei anderer Fensterbreite neu umbrechen; für feste Bilddarstellung PNG verwenden.
+
+**PDF über die Firefox-Druckfunktion:** `save_pdf` verwendet [Firefox `tabs.saveAsPDF`](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/saveAsPDF). Firefox öffnet den nativen Speicherdialog, in dem Dateiname und Ziel gewählt werden. Der Tab muss bereits im zuletzt aktiven normalen Firefox-Fenster ausgewählt sein; das Werkzeug schaltet weder Tab noch Fenster selbst um. Die PDF nutzt Drucklayout, Druck-CSS und Seitenumbrüche und kann deshalb anders aussehen als der Screenshot. Sie verwendet keine gerasterte PNG-Kopie. Das Werkzeug liefert `status:"saved"` beziehungsweise `"replaced"` und `saved:true`, bei Abbruch `status:"canceled"` und `saved:false`. Firefox gibt den endgültigen Dateipfad nicht an das Add-on zurück. Der Speicherdialog erlaubt ausdrücklich auch das Ersetzen einer vorhandenen PDF.
+
+Exportanfragen warten höchstens fünf Minuten, einschließlich eventueller Inhaltsfreigabe. Ein Timeout oder Verbindungsabbruch schließt den nativen PDF-Speicherdialog nicht: Vor erneutem Aufruf den Dialog und vorhandene Dateien prüfen. Der PDF-Inhalt wird beim Bestätigen des Speicherdialogs gedruckt; Veränderungen der offenen Seite während des Dialogs können im Ergebnis erscheinen. Navigation, Neuladen, Entladen oder Schließen während des Dialogs werden als Warnung gemeldet, ohne eine bereits gespeicherte PDF als ungespeichert auszugeben. Zum Aktivieren der neuen Werkzeuge die Firefox-Erweiterung neu laden und die MCP-Verbindung im KI-Client neu starten.
 
 ## Installierte Erweiterungen abfragen
 
@@ -153,7 +180,7 @@ Eigene Zeit-Metadaten werden als Firefox-Sitzungswerte gespeichert. Sie können 
 
 ## Grenzen und lokale Daten
 
-Seiteninhalt ist auf geladene HTTP(S)-Seiten und den Hauptframe begrenzt. Browserinterne Seiten, andere Erweiterungsseiten, Reader-/Quelltextansicht, der PDF-Viewer sowie geschützte Mozilla-Seiten können keinen Inhalt liefern. Neue Navigationen erlauben HTTP(S) und `about:blank`. Private Fenster sind nur zugänglich, wenn Firefox die Erweiterung für private Fenster ausdrücklich zulässt. Das Add-on bietet keine beliebige JavaScript- oder Shell-Ausführung über MCP.
+Inhaltszugriff und Export sind auf geladene HTTP(S)-Seiten begrenzt; `read_content` liest nur den Hauptframe. Beim HTML-Export können zusätzlich zugängliche eingebettete Frames übernommen werden. Browserinterne Seiten, andere Erweiterungsseiten, Reader-/Quelltextansicht, der PDF-Viewer sowie geschützte Mozilla-Seiten können keinen Inhalt liefern. Neue Navigationen erlauben HTTP(S) und `about:blank`. Private Fenster sind nur zugänglich, wenn Firefox die Erweiterung für private Fenster ausdrücklich zulässt. Das Add-on bietet keine beliebige JavaScript- oder Shell-Ausführung über MCP.
 
 `.local/config.json` enthält das gemeinsame Zugriffstoken. Das Setup beschränkt `.local` und seine erzeugten Dateien unter Windows auf den aktuellen Benutzer und SYSTEM; unter Unix gelten Verzeichnisrechte `0700` und Dateirechte `0600`. Die Konfiguration gehört nicht in Quellpakete oder Versionskontrolle. Es wird kein Token in die Konsolenausgabe geschrieben. Die Verbindung verlässt den Rechner nicht; von Codex angeforderter Seiteninhalt wird anschließend Teil der normalen Codex-Werkzeugantwort.
 

@@ -13,12 +13,15 @@ export class BridgeError extends Error {
 }
 
 /** A fixed-loopback, bounded native-host client. Mutations are never retried. */
-export function createBridgeClient({ port, token }, { timeoutMs = 35_000, contentTimeoutMs = 150_000 } = {}) {
+export function createBridgeClient({ port, token }, { timeoutMs = 35_000, contentTimeoutMs = 150_000, exportTimeoutMs = 300_000 } = {}) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 || !/^[a-f0-9]{64}$/i.test(token ?? '')) {
     throw new BridgeError('INVALID_CONFIG', 'Bridge configuration requires a port from 1024 to 65535 and a 64-character hex token.');
   }
   if (![timeoutMs, contentTimeoutMs].every(value => Number.isInteger(value) && value >= 1 && value <= 180_000)) {
     throw new BridgeError('INVALID_CONFIG', 'Bridge timeouts must be from 1 to 180000 milliseconds.');
+  }
+  if (!Number.isInteger(exportTimeoutMs) || exportTimeoutMs < 1 || exportTimeoutMs > 600_000) {
+    throw new BridgeError('INVALID_CONFIG', 'Export timeout must be from 1 to 600000 milliseconds.');
   }
 
   return {
@@ -113,7 +116,7 @@ export function createBridgeClient({ port, token }, { timeoutMs = 35_000, conten
         const timer = setTimeout(() => {
           finish(new BridgeError('BRIDGE_TIMEOUT', 'Firefox did not respond in time. The action may have completed; inspect the current state before retrying a change.'));
           req.destroy();
-        }, method === 'read_content' ? contentTimeoutMs : timeoutMs);
+        }, method === 'read_content' ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(method) ? exportTimeoutMs : timeoutMs);
         const onAbort = () => {
           finish(new BridgeError('CANCELLED', 'The request was cancelled. Firefox may already have applied the action; inspect the current state before retrying.'));
           req.destroy();
@@ -121,7 +124,7 @@ export function createBridgeClient({ port, token }, { timeoutMs = 35_000, conten
         signal?.addEventListener('abort', onAbort, { once: true });
         req.on('error', error => {
           if (error.code === 'ECONNREFUSED') {
-            finish(new BridgeError('FIREFOX_OFFLINE', 'Firefox bridge is unavailable. Start Firefox with the Codex Bridge extension enabled and verify native-host setup.'));
+            finish(new BridgeError('FIREFOX_OFFLINE', 'Firefox bridge is unavailable; registration does not mean the extension is running. First ask the user whether to wait for reconnection or open about:debugging#/runtime/this-firefox in Firefox to load or reload the Codex Bridge extension. Start Firefox if needed. Follow the user\'s choice, then retry firefox_status after the user finishes checking. Use Computer Use or other browser automation only as a last resort after recovery has failed or the user explicitly chooses that fallback. Do not automatically repeat a mutation whose outcome is unknown.'));
           } else {
             finish(new BridgeError('BRIDGE_DISCONNECTED', 'The local Firefox bridge connection failed. Inspect Firefox state before retrying a change.'));
           }
