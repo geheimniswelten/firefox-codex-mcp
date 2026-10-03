@@ -20,6 +20,8 @@ Ist die Erweiterung bzw. MCP-Anbindung registriert, aber nicht aktiv oder erreic
 
 Der optionale Skill `skills/firefox-browser/SKILL.md` bevorzugt Firefox auch bei allgemeinen Bezeichnungen wie „Browser“ und „Webbrowser“. Eine ausdrücklich andere Browserauswahl (z. B. Chrome oder Edge) hat Vorrang. Für Codex den Ordner `skills/firefox-browser` nach `%USERPROFILE%\.codex\skills\firefox-browser` kopieren (bei gesetztem `CODEX_HOME` in dessen `skills`-Verzeichnis). Der Skill enthält den Wiederherstellungsablauf auch für den Fall, dass der MCP-Server selbst nicht erreichbar ist. Er wird dadurch unabhängig von den Server-Anweisungen auffindbar.
 
+Bei Suchtreffern zu offenen Tabs nennt der Skill Titel und Tab-ID; URLs erscheinen bei Bedarf als nicht anklickbarer Code. Ein Folgeauftrag wie „Zeige Tab 123 in Firefox“ aktiviert den bestehenden Tab und holt sein Fenster nach vorne. Anklickbare Folgeaktionen setzen eine tatsächlich unterstützende Client-Oberfläche voraus; eine Skill-Änderung allein macht Webseiten-Links nicht zu MCP-Aufrufen.
+
 - Desktop-Firefox **140 oder neuer** für native Tabgruppen und die aktuelle Firefox-Datenfreigabe bei der Installation.
 - **Node.js 22 oder neuer** einschließlich npm. Der Windows-Installer verwendet eine passende vorhandene Installation oder richtet automatisch Node 24 LTS samt npm unter `.runtime/node` im Projekt ein. Eine vorherige systemweite Node-Installation ist damit nicht erforderlich.
 - Ein KI-Client mit Unterstützung für lokale MCP-Server, beispielsweise Codex oder Claude Code.

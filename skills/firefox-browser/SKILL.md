@@ -7,6 +7,14 @@ description: Steuere Firefox über die Firefox-MCP-Anbindung bei Aufgaben mit Fi
 
 Bei der Steuerung vorhandener Browser-Tabs, Fenster, Erweiterungen oder Seiten ist Firefox die Standardauswahl, wenn der Nutzer Firefox oder eine allgemeine Bezeichnung wie Browser, Webbrowser oder Internetbrowser verwendet. Eine ausdrückliche andere Browserauswahl im Auftrag, ein ausgewählter Tab oder eine bereits etablierte Browserauswahl im Gespräch hat Vorrang. Aufgaben für mehrere ausdrücklich genannte Browser jeweils im genannten Browser bearbeiten.
 
+## Suchtreffer als vorhandene Tabs anzeigen
+
+Bei Suchergebnissen zu bereits offenen Firefox-Tabs Titel und Tab-ID nennen. URLs bei Bedarf in Inline-Code zeigen, damit sie nicht als Webseiten-Links geöffnet werden. Explizit gewünschte Webseiten-Links weiterhin ausgeben.
+
+Eine Skill-Anweisung allein macht aus einem Webseiten-Link keinen Aufruf eines MCP-Tools. Anklickbare Folgeaktionen nur verwenden, wenn die aktuelle Client-Oberfläche sie tatsächlich unterstützt; ihre Funktion nicht allein aufgrund einer Skill-Änderung oder eines Neustarts versprechen. In dieser Codex-Sitzung wurde eine solche Aktion als gewöhnlicher URL-Link geöffnet. Hier stattdessen einen kurzen Folgeauftrag wie „Zeige Tab 123 in Firefox“ anbieten.
+
+Beim Folgeauftrag die Tab-ID und die erwartete URL aus dem Suchtreffer mit `firefox_get_tabs` oder `firefox_list_tabs` prüfen und die aktuelle Fenster-ID verwenden. Fehlt der Tab oder weicht seine URL ab, dies melden, statt einen neuen Tab zu öffnen oder zu navigieren. Mit `firefox_update_tab` (`active: true`, ohne `url`) den vorhandenen Tab aktivieren und mit `firefox_update_window` (`focused: true`, bei minimiertem Fenster zusätzlich `state: "normal"`) sein Fenster nach vorne holen. Beim bloßen Anzeigen der Suchergebnisse noch keine Tabs aktivieren. Der Verbindungsablauf unten gilt auch für diese Folgeaufträge.
+
 ## Verbindung vor Browser-Automatisierung
 
 Die Firefox-MCP-Tools bevorzugen und bei unbekanntem Verbindungszustand `firefox_status` aufrufen. Die registrierte MCP-Anbindung oder Erweiterung beweist nicht, dass sie aktiv ist. Aktuelle IDs vor Änderungen mit den passenden List-/Get-Tools ermitteln; vollständige Ergebnisse inklusive Pagination beachten.
