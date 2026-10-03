@@ -18,7 +18,7 @@
   const METHODS = {
     status: [], get_current: [], list_windows: ["populate"],
     list_extensions: ["enabled", "type", "limit", "offset"],
-    list_tabs: ["windowId", "active", "audible", "muted", "discarded", "groupId", "limit", "offset"],
+    list_tabs: ["windowId", "active", "audible", "muted", "discarded", "groupId", "query", "searchIn", "matchMode", "caseSensitive", "limit", "offset"],
     get_tabs: ["tabIds"], create_tab: ["url", "windowId", "active", "pinned", "index"],
     update_tab: ["tabId", "url", "active", "pinned", "muted"], set_muted: ["tabIds", "muted"],
     close_tabs: ["tabIds"], move_tabs: ["tabIds", "windowId", "index"], discard_tabs: ["tabIds"], reload_tabs: ["tabIds", "bypassCache"],
@@ -39,6 +39,7 @@
     if (!own(METHODS, method)) throw new BridgeError("METHOD_NOT_FOUND", "Unbekannte Firefox-Methode.");
     if (!p || typeof p !== "object" || Array.isArray(p)) fail("params muss ein Objekt sein.");
     for (const key of Object.keys(p)) if (!METHODS[method].includes(key)) fail(`Unbekannter Parameter: ${key}`);
+    if (method === "list_tabs") globalThis.FirefoxBridgeTabSearch.validateSearch(p);
     for (const key of ["tabId", "windowId", "groupId", "index", "limit", "offset", "maxChars"]) {
       if (!own(p, key)) continue;
       const min = (key === "index" || (key === "groupId" && method === "list_tabs")) ? -1 : 0;
@@ -276,7 +277,12 @@
           return { extensions, total: addons.length, offset, limit, returned: extensions.length, nextOffset: offset + extensions.length < addons.length ? offset + extensions.length : null };
         }
         case "list_tabs": {
-          const tabs = await browser.tabs.query(pick(p, ["windowId", "active", "audible", "muted", "discarded", "groupId"]));
+          const candidates = await browser.tabs.query(pick(p, ["windowId", "active", "audible", "muted", "discarded", "groupId"]));
+          context.assertLive?.();
+          const tabs = await globalThis.FirefoxBridgeTabSearch.filterTabs(candidates, p, {
+            workerFactory: options.searchWorkerFactory || (() => new Worker(browser.runtime.getURL("tab-search-worker.js"))),
+          });
+          context.assertLive?.();
           tabs.sort((a, b) => a.windowId - b.windowId || a.index - b.index);
           const offset = p.offset ?? 0, limit = p.limit ?? 100;
           const page = tabs.slice(offset, offset + limit);

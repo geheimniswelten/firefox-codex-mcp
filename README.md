@@ -130,7 +130,32 @@ Alle 25 Werkzeugnamen haben das Präfix `firefox_`:
 | Seiteninhalt | `read_content` |
 | Seitenexport | `save_png`, `save_html`, `save_pdf` |
 
-Beispiele für Codex: „Liste alle entladenen Firefox-Tabs“, „Schalte diese drei Tabs stumm“, „Verschiebe die ausgewählten Tabs in ein neues Fenster“, „Fasse den Inhalt des aktiven Tabs zusammen“. IDs zunächst anhand der Übersicht auflösen. `list_tabs` unterstützt Fenster, Aktivität, Audio, Stummschaltung, Entladezustand und Gruppe als Filter; Standard sind 100, maximal 500 Tabs pro Seite mit `offset`/`limit`.
+Beispiele für Codex: „Liste alle entladenen Firefox-Tabs“, „Finde Tabs mit localhost in der URL“, „Schalte diese drei Tabs stumm“, „Verschiebe die ausgewählten Tabs in ein neues Fenster“, „Fasse den Inhalt des aktiven Tabs zusammen“. IDs zunächst anhand der Übersicht oder einer gezielten Suche auflösen. `list_tabs` unterstützt Fenster, Aktivität, Audio, Stummschaltung, Entladezustand und Gruppe als Filter; Standard sind 100, maximal 500 Tabs pro Seite mit `offset`/`limit`.
+
+Mit `query` sucht `firefox_list_tabs` direkt in Firefox nach Titel oder URL, ohne alle Tabs an den KI-Client zu übertragen. Die Suchoptionen sind:
+
+| Parameter | Bedeutung |
+| --- | --- |
+| `query` | Suchtext oder RegEx-Quelltext mit 1–4096 Zeichen |
+| `searchIn` | `"title"`, `"url"` oder `"both"` (Standard); bei `"both"` genügt ein Treffer in einem der beiden Felder |
+| `matchMode` | `"contains"` für eine wörtliche Teilsuche (Standard) oder `"regex"` für einen JavaScript-RegEx |
+| `caseSensitive` | Groß-/Kleinschreibung beachten; Standard `false` |
+
+`searchIn`, `matchMode` und `caseSensitive` benötigen `query`. Ein RegEx wird ohne `/.../`-Hülle angegeben; die Flags werden aus `caseSensitive` bestimmt. Ungültige Suchparameter oder RegEx-Syntax melden `INVALID_PARAMS`. Für die RegEx-Auswertung gilt ein Zeitlimit von einer Sekunde; bei Überschreitung meldet die Suche `SEARCH_TIMEOUT`.
+
+Konkrete MCP-Aufrufe:
+
+```text
+firefox_list_tabs({"query":"localhost","searchIn":"url"})
+firefox_list_tabs({"query":"^https?://localhost(?::[0-9]+)?/","searchIn":"url","matchMode":"regex"})
+firefox_list_tabs({"query":"Entwurf","searchIn":"title","caseSensitive":true,"discarded":true,"limit":50})
+```
+
+Die Erweiterung kombiniert die Suche mit den übrigen Filtern und prüft vollständige Titel und URLs vor Antwortkürzung, Sortierung und Pagination. `total`, `offset` und `nextOffset` beziehen sich nur auf die Treffer; `nextOffset: null` bedeutet, dass keine weitere Seite folgt. Die Suche aktiviert keine Tabs, weckt keine entladenen Tabs und liest keine Seiteninhalte.
+
+Nach diesem Update das Add-on unter `about:debugging#/runtime/this-firefox` **neu laden** und die MCP-Verbindung im KI-Client **neu starten**, damit beide Seiten die Suchparameter und das neue Werkzeugschema verwenden. Wird der optionale Firefox-Skill genutzt, dessen Projektkopie erneut ins Skill-Verzeichnis des Clients kopieren.
+
+Der optionale Browsertest `npm run test:firefox-tab-search` prüft die Suche mit echten Firefox-Tabs und Workern in einem eigenen Headless-Testprofil unter `work/`. Er benötigt Firefox und die Entwicklungsabhängigkeit `web-ext`; das normale Benutzerprofil wird nicht verwendet.
 
 `read_content` liefert Text oder HTML aus dem Hauptframe, optional für einen CSS-Selektor und mit Links. Standardlimit: 30.000 Zeichen; Maximum: 100.000. Kürzungen werden angezeigt. Schließen, Navigation, Neuladen und Entladen können ungespeicherte Seitendaten verlieren. Batch-Aktionen liefern Einzelergebnisse und können teilweise erfolgreich sein; nach einem Timeout oder Teilfehler zunächst Zustand prüfen, bevor erneut verändert wird. Parameterdetails stehen in `PROTOCOL.md` und den MCP-Werkzeugschemata.
 

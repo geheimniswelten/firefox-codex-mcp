@@ -14,7 +14,7 @@
     }
   },
   "permissions": ["tabs", "tabGroups", "sessions", "storage", "nativeMessaging", "management", "<all_urls>"],
-  "background": {"scripts": ["policy.js", "export-transfers.js", "png-export.js", "html-export.js", "pdf-export.js", "core.js", "background.js"], "persistent": true},
+  "background": {"scripts": ["policy.js", "export-transfers.js", "png-export.js", "html-export.js", "pdf-export.js", "tab-search.js", "core.js", "background.js"], "persistent": true},
   "browser_action": {
     "default_title": "Firefox ↔ Codex MCP",
     "default_popup": "popup.html",

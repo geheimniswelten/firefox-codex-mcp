@@ -37,6 +37,10 @@ test('real SDK stdio exposes all tools, forwards calls and rejects invalid schem
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body);
     requests.push(request);
+    if (request.method === 'list_tabs' && request.params.query === '[' && request.params.matchMode === 'regex') {
+      res.end(JSON.stringify({ error: { code: 'INVALID_PARAMS', message: 'Invalid Firefox regular expression.' } }));
+      return;
+    }
     let result = { method: request.method, params: request.params };
     if (request.method === 'close_tabs') result = { results: [{ tabId: 7, error: { code: 'NO_TAB', message: 'Missing tab.' } }], partialFailure: true };
     if (request.method === 'read_content') {
@@ -54,8 +58,9 @@ test('real SDK stdio exposes all tools, forwards calls and rejects invalid schem
   assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.ok(client.getInstructions().includes('untrusted'));
   assert.equal(tools.find(tool => tool.name === 'firefox_close_tabs').annotations.destructiveHint, true);
-  const result = await client.callTool({ name: 'firefox_list_tabs', arguments: { windowId: 3, limit: 5 } });
-  assert.deepEqual(result.structuredContent, { result: { method: 'list_tabs', params: { windowId: 3, limit: 5 } } });
+  const search = { windowId: 3, limit: 5, query: '^https?://localhost(:[0-9]+)?/', searchIn: 'url', matchMode: 'regex', caseSensitive: false };
+  const result = await client.callTool({ name: 'firefox_list_tabs', arguments: search });
+  assert.deepEqual(result.structuredContent, { result: { method: 'list_tabs', params: search } });
   assert.equal(result.isError, undefined);
   for (const args of [{ tabIds: [-1] }, { tabIds: [1], unknown: true }, { tabIds: [1, 1] }]) {
     const invalid = await client.callTool({ name: 'firefox_close_tabs', arguments: args });
@@ -63,15 +68,22 @@ test('real SDK stdio exposes all tools, forwards calls and rejects invalid schem
   }
   const invalidNavigation = await client.callTool({ name: 'firefox_create_tab', arguments: { url: 'javascript:alert(1)' } });
   assert.equal(invalidNavigation.isError, true);
+  for (const args of [{ searchIn: 'url' }, { query: 'x', caseSensitive: 'yes' }]) {
+    assert.equal((await client.callTool({ name: 'firefox_list_tabs', arguments: args })).isError, true);
+  }
   await assert.rejects(client.callTool({ name: 'firefox_execute_javascript', arguments: { code: 'alert(1)' } }), /not found/);
   assert.equal(requests.length, 1);
+  const invalidRegex = await client.callTool({ name: 'firefox_list_tabs', arguments: { query: '[', matchMode: 'regex' } });
+  assert.equal(invalidRegex.isError, true);
+  assert.equal(invalidRegex.structuredContent.error.code, 'INVALID_PARAMS');
+  assert.equal(requests.length, 2);
   const partial = await client.callTool({ name: 'firefox_close_tabs', arguments: { tabIds: [7] } });
   assert.equal(partial.isError, true);
   assert.equal(partial.structuredContent.result.partialFailure, true);
   const discarded = await client.callTool({ name: 'firefox_read_content', arguments: { tabId: 4 } });
   assert.equal(discarded.isError, true);
   assert.equal(discarded.structuredContent.error.code, 'TAB_DISCARDED');
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 4);
 });
 
 test('tool discovery works offline and a call gives an actionable isError response', async t => {

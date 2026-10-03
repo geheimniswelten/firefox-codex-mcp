@@ -136,20 +136,33 @@ function mergeToml(text, entry, remove) {
   if (begins.length || text.includes('# BEGIN firefox-codex-mcp') || text.includes('# END firefox-codex-mcp')) {
     if (begins.length !== 1) conflict('Der verwaltete TOML-Block ist mehrdeutig oder veraendert.');
     const begin = begins[0], bodyStart = begin.index + begin[0].length;
-    const endMarker = `# END firefox-codex-mcp${eol}`;
-    const end = text.indexOf(endMarker, bodyStart);
-    if (end < 0 || text.indexOf('# END firefox-codex-mcp', end + endMarker.length) >= 0) conflict('Der verwaltete TOML-Block ist unvollstaendig.');
-    const actualBody = text.slice(bodyStart, end), prefix = Number(begin[2]);
-    let expectedBody = body;
+    // Marker newlines can differ from unrelated TOML lines; END may be at EOF.
+    const ends = [...text.matchAll(/^# END firefox-codex-mcp(?:\r?\n|(?![\s\S]))/gmu)];
+    if (ends.length !== 1 || ends[0].index < bodyStart) conflict('Der verwaltete TOML-Block ist unvollstaendig.');
+    const end = ends[0], endAfter = end.index + end[0].length;
+    if (text.indexOf('# END firefox-codex-mcp', endAfter) >= 0) conflict('Der verwaltete TOML-Block ist unvollstaendig.');
+    const actualBody = text.slice(bodyStart, end.index), prefix = Number(begin[2]);
+    const bodyEol = eolOf(actualBody);
+    let expectedBody = tomlBody(entry, bodyEol);
     if (remove) {
       const oldCommand = /^command = (.+)$/mu.exec(actualBody)?.[1]?.replace(/\r$/u, '');
       if (oldCommand) {
         const command = JSON.parse(oldCommand);
-        if (typeof command === 'string' && isAbsolute(command) && /^node(?:\.exe)?$/iu.test(basename(command))) expectedBody = tomlBody({ ...entry, command }, eol);
+        if (typeof command === 'string' && isAbsolute(command) && /^node(?:\.exe)?$/iu.test(basename(command))) expectedBody = tomlBody({ ...entry, command }, bodyEol);
       }
     }
-    if (hash(`${prefix}\n${actualBody}`) !== begin[1] || actualBody !== expectedBody || text.slice(begin.index - prefix * eol.length, begin.index) !== eol.repeat(prefix)) conflict('Der verwaltete TOML-Block gehoert zu einer anderen Installation oder wurde angepasst.');
-    return remove ? text.slice(0, begin.index - prefix * eol.length) + text.slice(end + endMarker.length) : null;
+    let prefixStart = begin.index;
+    for (let remaining = prefix; remaining > 0; remaining--) {
+      if (text[prefixStart - 1] !== '\n') conflict('Der verwaltete TOML-Block gehoert zu einer anderen Installation oder wurde angepasst.');
+      prefixStart -= text[prefixStart - 2] === '\r' ? 2 : 1;
+    }
+    if (hash(`${prefix}\n${actualBody}`) !== begin[1] || actualBody !== expectedBody) conflict('Der verwaltete TOML-Block gehoert zu einer anderen Installation oder wurde angepasst.');
+    if (!remove) return null;
+    const before = text.slice(0, prefixStart), after = text.slice(endAfter);
+    // Later user sections still need a separator if the original file had none.
+    const separator = before && after && !before.endsWith('\n') && !/^\r?\n/u.test(after)
+      ? /^\r?\n/u.exec(text.slice(prefixStart, begin.index))?.[0] ?? bodyEol : '';
+    return before + separator + after;
   }
   if (remove) return null;
   // TOML is deliberately not reserialized without a full TOML parser. Ambiguous

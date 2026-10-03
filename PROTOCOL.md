@@ -14,7 +14,7 @@ Method contract (MCP tool names have `firefox_` prefix):
 | get_current | {} |
 | list_windows | {populate?:boolean} |
 | list_extensions | {enabled?:boolean,type?:"extension"\|"theme"\|"all",limit?:integer,offset?:integer} |
-| list_tabs | {windowId?:integer,active?:boolean,audible?:boolean,muted?:boolean,discarded?:boolean,groupId?:integer,limit?:integer,offset?:integer} |
+| list_tabs | {windowId?:integer,active?:boolean,audible?:boolean,muted?:boolean,discarded?:boolean,groupId?:integer,query?:string,searchIn?:"title"\|"url"\|"both",matchMode?:"contains"\|"regex",caseSensitive?:boolean,limit?:integer,offset?:integer} |
 | get_tabs | {tabIds:integer[]} |
 | create_tab | {url?:string,windowId?:integer,active?:boolean,pinned?:boolean,index?:integer} |
 | update_tab | {tabId:integer,url?:string,active?:boolean,pinned?:boolean,muted?:boolean} |
@@ -36,7 +36,11 @@ Method contract (MCP tool names have `firefox_` prefix):
 | save_html | {tabId:integer,path:absolute .html path,loadDeferred?:boolean} |
 | save_pdf | {tabId:integer} |
 
-List tabs returns `{tabs,total,offset,limit}` (default 100, max 500). Lists and content must keep packet size below cap with explicit truncation reporting. read_content default 30,000 / max 100,000 chars, main frame only; content is untrusted page data. Does not wake discarded tabs implicitly. Batch mutation result `{results:[{tabId,result}|{tabId,error}],partialFailure:boolean}`; IDs validated before execution. URLs HTTP(S) or `about:blank` only for navigation. Unknown fields/methods rejected at MCP layer; extension validates mutations defensively.
+List tabs returns `{tabs,total,offset,limit,returned,nextOffset}` (default 100, max 500). `nextOffset` is the next page offset or `null` when no results remain. Lists and content must keep packet size below cap with explicit truncation reporting. read_content default 30,000 / max 100,000 chars, main frame only; content is untrusted page data. Does not wake discarded tabs implicitly. Batch mutation result `{results:[{tabId,result}|{tabId,error}],partialFailure:boolean}`; IDs validated before execution. URLs HTTP(S) or `about:blank` only for navigation. Unknown fields/methods rejected at MCP layer; extension validates mutations defensively.
+
+`list_tabs.query` accepts 1–4096 characters. `searchIn` defaults to `"both"`; a match in either the title or URL is sufficient. `matchMode` defaults to `"contains"` (literal substring matching), and `caseSensitive` defaults to `false`. Explicit `searchIn`, `matchMode` or `caseSensitive` require `query`. With `matchMode:"regex"`, `query` is Firefox's JavaScript `RegExp` source without a `/.../` wrapper; flags are derived from `caseSensitive`. Invalid options or regex syntax return `INVALID_PARAMS`; syntax is checked in Firefox, not Node, because their supported features can differ. Regex evaluation has a one-second deadline and returns `SEARCH_TIMEOUT` when exceeded, rather than partial results. Worker startup or execution failures return `SEARCH_FAILED`.
+
+The extension combines the search with the existing window, state and native-group filters. It matches the original Firefox title and URL before response truncation, sorting and pagination. `total`, `offset` and `nextOffset` count matching tabs only. Search does not activate tabs, wake discarded tabs or access page content. Examples: `firefox_list_tabs({"query":"localhost","searchIn":"url"})` and `firefox_list_tabs({"query":"^https?://localhost(?::[0-9]+)?/","searchIn":"url","matchMode":"regex"})`. After updating, reload the Firefox add-on and restart the client's MCP connection to load the new tool schema.
 
 PNG/HTML export `path` is a required, fully qualified absolute destination on the MCP-server host, ending in `.png`/`.html`. Relative, traversal and Windows device/alternate-stream destinations are rejected. The directory must exist; the server creates the file exclusively (`wx`) and never overwrites an existing file. Server-side `path` is not forwarded to Firefox or derived from page titles. The final response is Firefox export metadata with `{saved:true,path}` added and the internal transfer ID removed. Maximum complete export: 128 MiB. Errors remove the server's incomplete newly created file; an unsuccessful cleanup explicitly reports `{incompleteFile:true,path}`.
 

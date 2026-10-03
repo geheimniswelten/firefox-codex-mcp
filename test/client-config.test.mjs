@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile, readdir, rm, symlink, link, chmod, lstat } from 'node:fs/promises';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import yaml from 'js-yaml';
 import { mergeConfigText, detectClients, configureClients } from '../scripts/client-config.mjs';
 
@@ -134,6 +135,111 @@ test('Codex TOML marked blocks round-trip original bytes and detect any managed-
   const result = merge(stringContainingMarker, { format: 'toml', remove: true });
   assert.equal(result.status, 'conflict');
   assert.equal(result.text, stringContainingMarker);
+});
+
+// Split only freshly generated fixture blocks to edit marker/separator bytes.
+function tomlFixtureParts(text) {
+  const begin = text.indexOf('# BEGIN firefox-codex-mcp');
+  const body = text.indexOf('\n', begin) + 1;
+  const end = text.indexOf('# END firefox-codex-mcp', body);
+  return { prefix: text.slice(0, begin), begin: text.slice(begin, body), body: text.slice(body, end), end: text.slice(end) };
+}
+function assertTomlRoundTrip(text, expected, label) {
+  const unchanged = merge(text, { format: 'toml' });
+  assert.equal(unchanged.status, 'unchanged', `${label}: ${unchanged.message}`);
+  assert.equal(unchanged.text, text, label);
+  const removed = merge(text, { format: 'toml', remove: true });
+  assert.equal(removed.status, 'removed', `${label}: ${removed.message}`);
+  assert.equal(removed.text, expected, label);
+}
+
+test('Codex TOML preserves external EOL edits and following foreign tables byte for byte', () => {
+  for (const bodyEol of ['\n', '\r\n']) {
+    const externalEol = bodyEol === '\n' ? '\r\n' : '\n';
+    const original = `# settings${bodyEol}model = "example"${bodyEol}`;
+    const configured = merge(original, { format: 'toml' }).text;
+    const changedOriginal = `# settings${externalEol}model = "example"${externalEol}`;
+    const suffix = '\r\n# leave this table untouched\n[mcp_servers.weather]\r\ncommand = "other"\nargs = ["remote"]\r\n';
+    const mixed = changedOriginal + configured.slice(original.length) + suffix;
+    assertTomlRoundTrip(mixed, changedOriginal + suffix, JSON.stringify(bodyEol));
+  }
+});
+
+test('Codex TOML recognizes independently changed BEGIN and END line endings without changing its body', () => {
+  for (const bodyEol of ['\n', '\r\n']) {
+    const markerEol = bodyEol === '\n' ? '\r\n' : '\n';
+    const original = `model = "example"${bodyEol}`;
+    const parts = tomlFixtureParts(merge(original, { format: 'toml' }).text);
+    for (const marker of ['begin', 'end']) {
+      const changed = { ...parts, [marker]: parts[marker].slice(0, -bodyEol.length) + markerEol };
+      const text = changed.prefix + changed.begin + changed.body + changed.end;
+      assertTomlRoundTrip(text, original, `${marker} ${JSON.stringify(bodyEol)}`);
+    }
+  }
+});
+
+test('Codex TOML END at EOF needs no trailing newline for either managed-body EOL', () => {
+  for (const original of ['', 'model = "example"\r\n']) {
+    const configured = merge(original, { format: 'toml' }).text;
+    const eof = configured.replace(/\r?\n$/u, '');
+    assertTomlRoundTrip(eof, original, JSON.stringify(original));
+  }
+});
+
+test('Codex TOML removes exactly its zero, one or two prefix newlines with mixed separators', () => {
+  const suffix = '\n[features]\r\nkeep = true\n';
+  for (const [original, separator] of [
+    ['', ''],
+    ['model = "example"\n', '\r\n'],
+    ['model = "example"', '\n\r\n'],
+    ['model = "example"', '\r\n\n']
+  ]) {
+    const parts = tomlFixtureParts(merge(original, { format: 'toml' }).text);
+    const mixed = original + separator + parts.begin + parts.body + parts.end + suffix;
+    assertTomlRoundTrip(mixed, original + suffix, JSON.stringify([original, separator]));
+  }
+  const original = 'model = "example"';
+  const parts = tomlFixtureParts(merge(original, { format: 'toml' }).text);
+  const adjacentSuffix = '[features]\r\nkeep = true\n';
+  for (const separator of ['\n\r\n', '\r\n\n']) {
+    const mixed = original + separator + parts.begin + parts.body + parts.end + adjacentSuffix;
+    const retainedSeparator = separator.startsWith('\r\n') ? '\r\n' : '\n';
+    assertTomlRoundTrip(mixed, original + retainedSeparator + adjacentSuffix, `adjacent foreign table ${JSON.stringify(separator)}`);
+  }
+  const missingSeparator = original + '\r\n' + parts.begin + parts.body + parts.end;
+  const rejected = merge(missingSeparator, { format: 'toml', remove: true });
+  assert.equal(rejected.status, 'conflict');
+  assert.equal(rejected.text, missingSeparator);
+});
+
+test('Codex TOML still rejects changed body bytes, foreign ownership and incomplete or ambiguous markers', () => {
+  const marked = merge('model = "example"\n', { format: 'toml' }).text;
+  const parts = tomlFixtureParts(marked);
+  const withBody = body => {
+    const prefix = /prefix=([012])/u.exec(parts.begin)[1];
+    const hash = createHash('sha256').update(`${prefix}\n${body}`).digest('hex');
+    const begin = parts.begin.replace(/sha256=[a-f0-9]{64}/u, `sha256=${hash}`);
+    return parts.prefix + begin + body + parts.end;
+  };
+  const crlf = merge('model = "example"\r\n', { format: 'toml' }).text;
+  const crlfParts = tomlFixtureParts(crlf);
+  const cases = [
+    ['body LF to CRLF with original hash', parts.prefix + parts.begin + parts.body.replaceAll('\n', '\r\n') + parts.end],
+    ['body CRLF to LF with original hash', crlfParts.prefix + crlfParts.begin + crlfParts.body.replaceAll('\r\n', '\n') + crlfParts.end],
+    ['changed setting even with recomputed hash', withBody(parts.body.replace('tool_timeout_sec = 180', 'tool_timeout_sec = 181'))],
+    ['foreign args even with recomputed hash', withBody(parts.body.replace(JSON.stringify(entry.args), JSON.stringify(['foreign.mjs'])))],
+    ['modified hash', marked.replace(/sha256=[a-f0-9]{64}/u, `sha256=${'0'.repeat(64)}`)],
+    ['missing END', parts.prefix + parts.begin + parts.body],
+    ['duplicate END', marked + parts.end],
+    ['END marker prefix with suffix', marked.replace('# END firefox-codex-mcp', '# END firefox-codex-mcp-suffix')]
+  ];
+  for (const [label, text] of cases) {
+    for (const remove of [false, true]) {
+      const result = merge(text, { format: 'toml', remove });
+      assert.equal(result.status, 'conflict', `${label}, remove=${remove}: ${result.message}`);
+      assert.equal(result.text, text, label);
+    }
+  }
 });
 
 test('YAML MCP edits preserve all unrelated comments and values', () => {

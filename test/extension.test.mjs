@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
+import '../extension/tab-search.js';
 import '../extension/core.js';
 import '../extension/policy.js';
 const { createService, SESSION_KEY, boundResponse, validate } = globalThis.FirefoxBridgeCore;
@@ -113,6 +114,81 @@ function mockBrowser(initial = []) {
   };
   return browser;
 }
+
+test('tab search filters the full inventory before sorting and paginating without waking tabs', async () => {
+  const unrelated = Array.from({ length: 600 }, (_, index) => ({ id: index + 1, title: `Other ${index}`, url: 'https://other.test/' }));
+  const browser = mockBrowser([
+    ...unrelated,
+    { id: 601, title: 'NEEDLE in title', index: 5, discarded: true },
+    { id: 602, title: 'Other', url: 'https://needle.test/', index: 1 },
+    { id: 603, title: 'Needle in another window', windowId: 2, index: 0 },
+  ]);
+  const service = createService(browser); await service.ready;
+  browser.calls.length = 0;
+  const first = await service.handle('list_tabs', { query: 'needle', limit: 1 });
+  assert.deepEqual(first.tabs.map(tab => tab.id), [602]);
+  assert.deepEqual({ total: first.total, returned: first.returned, nextOffset: first.nextOffset }, { total: 3, returned: 1, nextOffset: 1 });
+  const second = await service.handle('list_tabs', { query: 'needle', limit: 2, offset: first.nextOffset });
+  assert.deepEqual(second.tabs.map(tab => tab.id), [601, 603]);
+  assert.equal(second.tabs[0].discarded, true);
+  assert.equal(second.total, 3); assert.equal(second.offset, 1); assert.equal(second.nextOffset, null);
+  const pastEnd = await service.handle('list_tabs', { query: 'needle', offset: 4 });
+  assert.equal(pastEnd.total, 3); assert.equal(pastEnd.returned, 0); assert.equal(pastEnd.nextOffset, null);
+  const missing = await service.handle('list_tabs', { query: 'no-match' });
+  assert.equal(missing.total, 0); assert.equal(missing.returned, 0); assert.equal(missing.nextOffset, null);
+  assert.deepEqual(browser.calls, []);
+  service.tracker.stop();
+});
+
+test('tab search combines with native filters without passing text options to Firefox query', async () => {
+  const matching = { title: 'Needle', windowId: 2, groupId: 1_790_771_234_567, active: false, audible: true, discarded: true, mutedInfo: { muted: false } };
+  const browser = mockBrowser([
+    { id: 1, ...matching }, { id: 2, ...matching, windowId: 1 },
+    { id: 3, ...matching, mutedInfo: { muted: true } }, { id: 4, ...matching, title: 'Other' },
+  ]);
+  const service = createService(browser); await service.ready;
+  const query = browser.tabs.query.bind(browser.tabs), queries = [];
+  browser.tabs.query = async params => { queries.push(params); return query(params); };
+  const filters = { windowId: 2, groupId: matching.groupId, active: false, audible: true, discarded: true, muted: false };
+  const result = await service.handle('list_tabs', { ...filters, query: 'Needle', searchIn: 'title', caseSensitive: true });
+  assert.deepEqual(result.tabs.map(tab => tab.id), [1]); assert.equal(result.total, 1);
+  assert.deepEqual(queries, [filters]);
+  for (const params of [{ query: '' }, { query: 'x'.repeat(4097) }, { query: '[', matchMode: 'regex' }, { caseSensitive: false }, { searchIn: 'title' }]) {
+    await assert.rejects(service.handle('list_tabs', params), { code: 'INVALID_PARAMS' });
+  }
+  assert.equal(queries.length, 1);
+  service.tracker.stop();
+});
+
+test('regex tab search matches raw metadata before pagination and preserves response size cursors', async () => {
+  const source = await readFile(new URL('../extension/tab-search-worker.js', import.meta.url), 'utf8');
+  const workerFactory = () => {
+    const listeners = new Map();
+    const worker = {
+      terminate() {}, addEventListener(name, listener) { listeners.set(name, listener); },
+      removeEventListener(name) { listeners.delete(name); },
+      postMessage(data) { queueMicrotask(() => context.onmessage({ data })); },
+    };
+    const context = vm.createContext({ postMessage: data => listeners.get('message')?.({ data }) });
+    vm.runInContext(source, context);
+    return worker;
+  };
+  const browser = mockBrowser([
+    { id: 1, title: `${'x'.repeat(100_000)}Needle`, url: 'https://example.test/' },
+    { id: 2, title: 'Other', url: 'http://localhost:8080/app' },
+    { id: 3, title: 'Needle again', url: 'https://other.test/' },
+  ]);
+  const service = createService(browser, { searchWorkerFactory: workerFactory }); await service.ready;
+  const result = await service.handle('list_tabs', { query: 'needle', searchIn: 'title', matchMode: 'regex', limit: 1 });
+  assert.deepEqual(result.tabs.map(tab => tab.id), [1]); assert.equal(result.total, 2); assert.equal(result.nextOffset, 1);
+  const local = await service.handle('list_tabs', { query: '^https?://localhost(:[0-9]+)?/', searchIn: 'url', matchMode: 'regex' });
+  assert.deepEqual(local.tabs.map(tab => tab.id), [2]);
+  const huge = Array.from({ length: 10 }, (_, index) => ({ id: index, title: `${'x'.repeat(100_000)}Needle` }));
+  const bounded = boundResponse({ tabs: huge, total: 15, offset: 2, limit: 10, returned: 10, nextOffset: 12 });
+  assert.equal(bounded.total, 15); assert.equal(bounded.nextOffset, bounded.offset + bounded.returned);
+  assert.equal(bounded.truncationReason, 'packet-size');
+  service.tracker.stop();
+});
 
 test('pre-existing creation is unknown; observed creation and sessions survive a restart without ID-keyed storage', async () => {
   let now = Date.parse('2026-09-30T10:00:00Z');

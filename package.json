@@ -12,6 +12,7 @@
     "test": "node --test test/*.test.mjs",
     "check": "node scripts/check.mjs",
     "test:firefox-exports": "node scripts/test-exports-firefox.mjs",
+    "test:firefox-tab-search": "node scripts/test-tab-search-firefox.mjs",
     "build:html-vendor": "node scripts/build-html-vendor.mjs",
     "package": "node scripts/package.mjs",
     "setup": "node scripts/setup.mjs"

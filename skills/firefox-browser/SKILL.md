@@ -9,6 +9,8 @@ Bei der Steuerung vorhandener Browser-Tabs, Fenster, Erweiterungen oder Seiten i
 
 ## Suchtreffer als vorhandene Tabs anzeigen
 
+Zum Finden vorhandener Tabs `firefox_list_tabs` mit `query` bevorzugen, statt alle Tabs auszulesen. `searchIn: "title"` oder `"url"` grenzt das Suchfeld ein; Standard `"both"` findet Treffer in Titel oder URL. Standard ist eine wörtliche Teilsuche ohne Beachtung der Groß-/Kleinschreibung; bei Bedarf `caseSensitive: true` oder `matchMode: "regex"` mit JavaScript-RegEx-Quelltext ohne `/.../`-Hülle setzen. Beispielsweise `{"query":"localhost","searchIn":"url"}` oder `{"query":"^https?://localhost(?::[0-9]+)?/","searchIn":"url","matchMode":"regex"}`. Suchoptionen benötigen `query` (1–4096 Zeichen). Bestehende Fenster-, Zustands- und Gruppenfilter lassen sich kombinieren; weitere Treffer über `nextOffset` abrufen. Die Suche liest nur Tab-Metadaten und aktiviert oder weckt keine Tabs. Bei `INVALID_PARAMS` das Suchmuster korrigieren; bei `SEARCH_TIMEOUT` den RegEx vereinfachen oder eine Teilsuche verwenden.
+
 Bei Suchergebnissen zu bereits offenen Firefox-Tabs Titel und Tab-ID nennen. URLs bei Bedarf in Inline-Code zeigen, damit sie nicht als Webseiten-Links geöffnet werden. Explizit gewünschte Webseiten-Links weiterhin ausgeben.
 
 Eine Skill-Anweisung allein macht aus einem Webseiten-Link keinen Aufruf eines MCP-Tools. Anklickbare Folgeaktionen nur verwenden, wenn die aktuelle Client-Oberfläche sie tatsächlich unterstützt; ihre Funktion nicht allein aufgrund einer Skill-Änderung oder eines Neustarts versprechen. In dieser Codex-Sitzung wurde eine solche Aktion als gewöhnlicher URL-Link geöffnet. Hier stattdessen einen kurzen Folgeauftrag wie „Zeige Tab 123 in Firefox“ anbieten.

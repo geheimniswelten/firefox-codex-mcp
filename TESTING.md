@@ -1,3 +1,25 @@
+# Prüfstand vom 4. Oktober 2026
+
+## Codex-Registrierung bei gemischten Zeilenumbrüchen
+
+Die Installationswarnung „Der verwaltete TOML-Block ist unvollstaendig“ entstand bei einer vollständigen, korrekt registrierten Firefox-Konfiguration mit LF-Zeilenumbrüchen im eigenen Block und CRLF-Zeilenumbrüchen in anderen Teilen der Datei. Der Installer suchte den Abschlussmarker mit dem global erkannten Zeilenumbruch. Er erkennt die Marker jetzt unabhängig davon und akzeptiert den Abschlussmarker auch am Dateiende ohne folgenden Zeilenumbruch. Prüfsumme und erwarteter Blockinhalt bleiben strikt geprüft; fremde oder geänderte Einträge werden weiterhin nicht übernommen.
+
+Die **50 relevanten Konfigurations-, Installer- und Deinstallationstests** bestanden mit **0 Fehlern und 1 übersprungenen Test** (51 insgesamt). Der bestehende Skip betrifft Windows-ACL-Operationen, deren ausdrücklich blockierter Zustand in dieser Umgebung nicht vorliegt. Neue Regressionstests decken gemischte externe Zeilenumbrüche, unabhängig geänderte Markerzeilen, den Abschlussmarker am Dateiende, tatsächliche Präfixseparatoren, Erhalt fremder Folgetabellen sowie unveränderte Konflikterkennung bei manipuliertem Inhalt, Hash, Argumenten und Markern ab. Beim Entfernen bleibt bei später angehängten Einstellungen ein benötigter Zeilentrenner erhalten; ohne solche Ergänzungen gilt weiterhin der exakte ursprüngliche Roundtrip.
+
+Ein **schreibfreier Probelauf mit der tatsächlichen Benutzerkonfiguration** meldete für Codex „unveraendert – Bereits passend registriert“ und endete mit Fehlercode **0**. Die Benutzerdateien wurden nicht geändert. Die folgenden Abschnitte dokumentieren frühere Prüfstände.
+
+# Prüfstand vom 3. Oktober 2026
+
+## Tabsuche nach Titel und URL
+
+`firefox_list_tabs` unterstützt jetzt `query`, `searchIn`, `matchMode` und `caseSensitive`. Die Erweiterung filtert vollständige Tab-Metadaten vor Sortierung, Pagination und Antwortkürzung; nur Treffer werden übertragen. RegEx-Matching läuft in einem kurzlebigen Worker mit einer Sekunde Zeitlimit. Die Syntaxprüfung erfolgt in Firefox, damit dessen RegEx-Funktionen nicht von einer abweichenden Node-Version eingeschränkt werden.
+
+Der vollständige Lauf mit Node **22.23.2** bestand mit **208 erfolgreichen Tests, 0 Fehlern und 1 übersprungenen Test** (209 insgesamt). Übersprungen wurde der bestehende Test für ausdrücklich blockierte Windows-ACL-Operationen, weil die Operationen in dieser Umgebung verfügbar sind. Die neuen Tests decken Teilsuche/RegEx, Titel/URL/ODER-Verknüpfung, Groß-/Kleinschreibung, vorhandene Filter, Treffer nach der ersten Inventarseite, Trefferpagination, vollständige Rohtexte, ungültige Parameter und Muster sowie Worker-Timeout, Fehler und Aufräumen ab. Die MCP-Integration prüft die Übertragung der Suchoptionen und die Weitergabe eines Firefox-Syntaxfehlers.
+
+Der zusätzliche Headless-Lauf mit **Firefox 157.0** bestand mit **26 Prüfungen**. Ein eigenes Profil und eine Kopie der Erweiterung unter `work/` enthielten 105 Fülltabs vor vier Treffern sowie ein zweites Fenster. Echte Titel-/URL-Suchen, Teilsuche und RegEx, Trefferpagination, Fenster- und Entladefilter funktionierten. Firefox akzeptierte auch disjunkte Alternativen mit gleichnamigen Capture-Gruppen, die Node 22 ablehnt. Der problematische Ausdruck `(a+)+$` auf 20.000 `a` mit abschließendem `!` wurde nach **1006 ms** mit `SEARCH_TIMEOUT` beendet; eine weitere RegEx-Suche bestand unmittelbar danach. Das Benutzerprofil und der Native Host wurden dafür nicht verwendet. Wiederholbar mit `npm run test:firefox-tab-search`.
+
+Die Syntax von **94 JavaScript-Dateien** und das Manifest wurden erfolgreich geprüft. Mozilla `web-ext lint` meldete **0 Fehler, 0 Hinweise und die bereits vorhandenen 19 Warnungen** zu Android und mitgeliefertem SingleFile-Code. `git diff --check` war sauber. Die folgenden Abschnitte dokumentieren frühere Prüfstände.
+
 # Prüfstand vom 1. Oktober 2026
 
 ## Seitenexport als PNG, HTML und PDF

@@ -92,6 +92,22 @@ test('pagination, content limits and selectors are bounded', () => {
   }
 });
 
+test('tab search accepts literal text and regex with bounded, dependent options', () => {
+  assert.ok(valid('list_tabs', { query: 'localhost', windowId: 2, discarded: true, limit: 5, offset: 1 }));
+  assert.ok(valid('list_tabs', { query: '^https?://localhost(:[0-9]+)?/', searchIn: 'url', matchMode: 'regex', caseSensitive: false }));
+  assert.ok(valid('list_tabs', { query: '[', matchMode: 'contains', searchIn: 'title' }));
+  assert.ok(valid('list_tabs', { query: ' ', searchIn: 'both' }));
+  assert.ok(valid('list_tabs', { query: 'a'.repeat(4096), caseSensitive: true }));
+  // Syntax is checked by Firefox, whose RegExp features may differ from Node's.
+  assert.ok(valid('list_tabs', { query: '(?<name>a)|(?<name>b)', matchMode: 'regex' }));
+  assert.ok(valid('list_tabs', { query: '[', matchMode: 'regex' }));
+  for (const args of [
+    { query: '' }, { query: 'a'.repeat(4097) }, { query: null }, { query: 123 },
+    { searchIn: 'title' }, { matchMode: 'contains' }, { caseSensitive: false },
+    { query: 'x', searchIn: 'content' }, { query: 'x', matchMode: 'glob' }, { query: 'x', caseSensitive: 'false' },
+  ]) assert.equal(valid('list_tabs', args), false, JSON.stringify(args));
+});
+
 test('mutually exclusive targets and empty updates are rejected', () => {
   assert.equal(valid('create_window', { url: ['https://example.com'], tabId: 1 }), false);
   assert.equal(valid('group_tabs', { tabIds: [1], groupId: 2, windowId: 3 }), false);
