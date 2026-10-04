@@ -20,8 +20,11 @@ function renderApproval(approval) {
   const scope = approval.scope === "tab" ? "diesen Tab mit genau der oben angegebenen URL" : approval.scope === "active" ? "jeweils den aktiven Tab im zuletzt aktiven Firefox-Fenster" : "alle Tabs";
   el("approvalDescription").textContent = approval.mode === "ask-session"
     ? `Für ${scope} freigeben: bis zu 12 Stunden ab Freigabe, spätestens bis Firefox neu startet. Diese Frist verlängert sich nicht durch Zugriffe.`
-    : `Nur diese Anfrage für ${scope} freigeben. Bei der nächsten Inhaltsanfrage wird erneut gefragt.`;
+    : approval.mode === "ask-five-days"
+      ? `Für ${scope} freigeben: für 5 Tage (120 Stunden) ab Zustimmung, auch nach einem Firefox- oder Erweiterungsneustart. Diese Frist verlängert sich nicht durch Zugriffe. Nach Ablauf wird erneut gefragt.`
+      : `Nur diese Anfrage für ${scope} freigeben. Bei der nächsten Inhaltsanfrage wird erneut gefragt.`;
   if (approval.scope === "tab") el("approvalDescription").textContent += " Andere Tabs und andere URLs benötigen eine eigene Freigabe.";
+  if (approval.scope === "tab" && approval.mode === "ask-five-days") el("approvalDescription").textContent += " Die Freigabe bleibt an diesen Firefox-Tab gebunden. Navigation, Neuladen, Entladen oder Schließen widerruft sie.";
   const expired = !Number.isFinite(approval.expiresAt) || Date.now() >= approval.expiresAt;
   el("approvalAllow").disabled = approvalSubmitting || expired;
   el("approvalDeny").disabled = approvalSubmitting || expired;
@@ -96,7 +99,13 @@ function render(state) {
   el("reconnect").disabled = !settings.enabled;
   el("contentMode").value = settings.contentMode;
   el("contentScope").value = settings.contentScope;
-  el("session").textContent = state.sessionExpiresAt && state.sessionExpiresAt > Date.now() ? `Sitzungsfreigabe bis ${new Date(state.sessionExpiresAt).toLocaleString("de-DE")}.` : settings.contentMode === "ask-session" ? "Noch keine aktive Sitzungsfreigabe." : "";
+  const fiveDays = settings.contentMode === "ask-five-days";
+  const expiresAt = fiveDays ? state.fiveDayExpiresAt : state.sessionExpiresAt;
+  el("session").textContent = ["ask-session", "ask-five-days"].includes(settings.contentMode)
+    ? Number.isFinite(expiresAt) && expiresAt > Date.now()
+      ? `${fiveDays ? "5-Tage-Freigabe" : "Sitzungsfreigabe"} bis ${new Date(expiresAt).toLocaleString("de-DE")}.`
+      : fiveDays ? "Noch keine aktive 5-Tage-Freigabe. Bei der nächsten Inhaltsanfrage wird gefragt." : "Noch keine aktive Sitzungsfreigabe."
+    : "";
   el("error").hidden = !state.lastError;
   el("error").textContent = state.lastError || "";
   el("version").textContent = state.version;

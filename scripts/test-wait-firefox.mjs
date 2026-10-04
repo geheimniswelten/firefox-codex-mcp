@@ -201,6 +201,67 @@ async function runWaitTests(origin, token) {
     const approvalTimeout = waitFor({ selector: '#offscreen', timeoutMs: 350 });
     await rejection('wait budget includes time spent on content approval', approvalTimeout, 'WAIT_TIMEOUT');
     equal('timeout releases the content approval slot', policy.promptPending, false);
+
+    // Exercise the production storage/session APIs. A fresh policy instance
+    // simulates extension initialization; the controlled clock avoids waiting
+    // five days. This does not restart Firefox or use the user's profile.
+    const { ContentAccess, FIVE_DAYS_MS } = FirefoxBridgePolicy;
+    let permissionTime = Date.now(), fiveDayPrompts = 0;
+    const fiveDaySettings = { enabled: true, contentMode: 'ask-five-days', contentScope: 'all' };
+    const persistent = new ContentAccess(browser, {
+      now: () => permissionTime, settings: fiveDaySettings,
+      requestApproval: async () => { fiveDayPrompts++; return true; }
+    });
+    await persistent.restoreApprovals();
+    await persistent.authorize(await browser.tabs.get(tab.id));
+    const fixedExpiry = permissionTime + FIVE_DAYS_MS;
+    equal('five-day approval starts with a fixed 120-hour deadline', persistent.expiresAt, fixedExpiry);
+    equal('five-day approval requires one explicit acceptance', fiveDayPrompts, 1);
+    permissionTime += 48 * 60 * 60 * 1000;
+    const restoredPersistent = new ContentAccess(browser, {
+      now: () => permissionTime, settings: fiveDaySettings,
+      requestApproval: async () => { fiveDayPrompts++; return false; }
+    });
+    await restoredPersistent.restoreApprovals();
+    equal('fresh policy restores the deadline from Firefox local storage', restoredPersistent.expiresAt, fixedExpiry);
+    await restoredPersistent.authorize(await browser.tabs.get(tab.id));
+    equal('restored five-day approval does not ask or extend its deadline', [fiveDayPrompts, restoredPersistent.expiresAt], [1, fixedExpiry]);
+    permissionTime = fixedExpiry;
+    await rejection('five-day approval expires at its exact stored deadline', restoredPersistent.authorize(await browser.tabs.get(tab.id)), 'CONTENT_DENIED');
+    persistent.resetApprovals(); await persistent.flushApprovals();
+    restoredPersistent.resetApprovals(); await restoredPersistent.flushApprovals();
+
+    const tabSettings = { enabled: true, contentMode: 'ask-five-days', contentScope: 'active' };
+    let tabPrompts = 0;
+    const tabPersistent = new ContentAccess(browser, {
+      now: () => permissionTime, settings: tabSettings,
+      requestApproval: async request => { tabPrompts++; equal('five-day background approval names its exact tab scope', request.scope, 'tab'); return true; }
+    });
+    await tabPersistent.restoreApprovals();
+    await tabPersistent.authorize(await browser.tabs.get(tab.id), {});
+    equal('background approval does not create a global five-day grant', tabPersistent.expiresAt, null);
+    const restoredTabPersistent = new ContentAccess(browser, {
+      now: () => permissionTime, settings: tabSettings,
+      requestApproval: async () => { tabPrompts++; return false; }
+    });
+    await restoredTabPersistent.restoreApprovals();
+    await restoredTabPersistent.authorize(await browser.tabs.get(tab.id), {});
+    equal('fresh policy restores the exact tab grant through Firefox session values', tabPrompts, 1);
+    const sameUrlTab = await browser.tabs.create({ windowId: window.id, url: origin + '/navigated', active: false });
+    await loaded(sameUrlTab.id, origin + '/navigated');
+    await rejection('a new tab with the same URL cannot inherit five-day approval', restoredTabPersistent.authorize(await browser.tabs.get(sameUrlTab.id), {}), 'CONTENT_DENIED');
+    await browser.tabs.remove(sameUrlTab.id);
+    await browser.tabs.reload(tab.id);
+    await loaded(tab.id, origin + '/navigated');
+    await tabPersistent.flushApprovals(); await restoredTabPersistent.flushApprovals();
+    await rejection('reload revokes an exact five-day background grant', restoredTabPersistent.authorize(await browser.tabs.get(tab.id), {}), 'CONTENT_DENIED');
+    const afterRevocation = new ContentAccess(browser, {
+      now: () => permissionTime, settings: tabSettings, requestApproval: async () => false
+    });
+    await afterRevocation.restoreApprovals();
+    await rejection('revoked background grants remain revoked after policy restoration', afterRevocation.authorize(await browser.tabs.get(tab.id), {}), 'CONTENT_DENIED');
+    afterRevocation.resetApprovals(); await afterRevocation.flushApprovals();
+    for (const access of [persistent, restoredPersistent, tabPersistent, restoredTabPersistent, afterRevocation]) access.windowTracker.stop();
     await sendReport({ ok: true, browser: browserInfo, checks, transitions, approvalAdapter: 'in-test allow/deny/AbortSignal; no native host or UI approval popup' });
   } catch (error) {
     let targetTab;

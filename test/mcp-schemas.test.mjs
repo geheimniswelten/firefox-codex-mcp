@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 const definitions = new Map(TOOL_DEFINITIONS.map(tool => [tool.method, tool]));
 const valid = (method, args) => definitions.get(method).inputSchema.safeParse(args).success;
 
-test('the 26 documented tools have complete annotations and strict object schemas', () => {
-  assert.equal(definitions.size, 26);
+test('the 33 documented tools have complete annotations and strict object schemas', () => {
+  assert.equal(definitions.size, 33);
   for (const tool of definitions.values()) {
     assert.equal(tool.name, `firefox_${tool.method}`);
     assert.ok(tool.description.length > 20);

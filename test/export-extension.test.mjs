@@ -105,6 +105,17 @@ test('PDF cannot bypass a permission reset while the final selected-window looku
   assert.equal(prints, 0);
 });
 
+test('PDF cannot print after five-day approval expires during the final selected-window lookup', async () => {
+  const { browser, tab } = browserFixture();
+  let now = 100, prints = 0;
+  const policy = { revision: 1, settings: { contentMode: 'ask-five-days' }, expiresAt: 200, now: () => now, authorize: async value => value, assertAfterRead: async () => ({ ...tab }) };
+  browser.windows.getLastFocused = async () => { now = 200; return { id: 1, type: 'normal', tabs: [{ ...tab }] }; };
+  browser.tabs.saveAsPDF = async () => { prints++; return 'saved'; };
+  const service = createService(browser, { contentAccess: policy });
+  await assert.rejects(service.handle('save_pdf', { tabId: 1 }), { code: 'SESSION_EXPIRED' });
+  assert.equal(prints, 0);
+});
+
 test('screenshot uses current viewport width/full height and restores even after capture failure', async () => {
   let restoreCalls = 0;
   const captures = [];

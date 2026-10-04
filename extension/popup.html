@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="de">
   <head>
     <meta charset="utf-8">
@@ -24,18 +24,18 @@
     <p id="error" class="error" hidden></p>
     <div class="actions"><button id="toggle" type="button">MCP deaktivieren</button><button id="reconnect" class="secondary" type="button">Neu verbinden</button></div>
     <label for="contentMode">Seiteninhalte auslesen</label>
-    <select id="contentMode"><option value="deny">Nicht erlauben</option><option value="allow">Erlauben</option><option value="ask-every-time">Jedes Mal fragen</option><option value="ask-session">Für eine Sitzung fragen (12 Stunden)</option></select>
+    <select id="contentMode"><option value="deny">Nicht erlauben</option><option value="allow">Erlauben</option><option value="ask-every-time">Jedes Mal fragen</option><option value="ask-session">Für eine Sitzung fragen (12 Stunden)</option><option value="ask-five-days">Für 5 Tage fragen (neustartübergreifend)</option></select>
     <label for="contentScope">Geltungsbereich für Seiteninhalte</label>
     <select id="contentScope"><option value="active">Aktiver Tab; andere Tabs einzeln auf Anfrage</option><option value="all">Alle Tabs</option></select>
     <p id="session" class="note"></p>
-    <p class="note">Andere Tabs werden einzeln mit ihrer URL angefragt. Sitzungsfreigaben enden nach 12 Stunden, beim Firefox-Neustart oder nach einer Einstellungsänderung. Entladene Tabs bleiben entladen.</p>
+    <p class="note">„Für 5 Tage fragen“ erteilt bei der Auswahl noch keine Freigabe. Nach Zustimmung gilt die Sitzungsfreigabe für feste 12 Stunden bis zum Neustart; die 5-Tage-Freigabe für feste 120 Stunden, auch über Neustarts hinweg. Zugriffe verlängern die Frist nicht. Nach Ablauf wird erneut gefragt. Andere Tabs werden einzeln mit ihrer URL angefragt; entladene Tabs bleiben entladen.</p>
     <div class="actions"><button id="resetApprovals" type="button" class="secondary">Temporäre Freigaben zurücksetzen</button></div>
-    <p class="note">Widerruft sofort alle Sitzungs- und Tabfreigaben und lehnt eine offene Anfrage ab. Die Inhaltsregeln bleiben erhalten.</p>
+    <p class="note">Widerruft sofort alle Sitzungs-, 5-Tage- und Tabfreigaben und lehnt eine offene Anfrage ab. Auch eine Änderung der Inhaltsregeln widerruft alle Freigaben. Die Inhaltsregeln bleiben beim Zurücksetzen erhalten.</p>
     <label class="permission-option" for="inventoryPermission"><input id="inventoryPermission" type="checkbox" disabled><span>Erweiterungsliste und Browser-Version freigeben</span></label>
     <p class="note permission-note">Erlaubt Codex, installierte Erweiterungen und ihren Aktivierungsstatus abzurufen.</p>
     <p id="inventoryError" class="error" hidden></p>
     <p class="legend"><span class="key blue"></span>≤ 1 Min. <span class="key amber"></span>≤ 30 Min. <span class="key green"></span>verbunden, inaktiv <span class="key gray"></span>aus/getrennt</p>
     </main>
-    <footer>Native Host: <code>de.codex.firefox_bridge</code><br>Version <span id="version">0.1.3</span></footer>
+    <footer>Native Host: <code>de.codex.firefox_bridge</code><br>Version <span id="version">1.0.2</span></footer>
   </body>
 </html>

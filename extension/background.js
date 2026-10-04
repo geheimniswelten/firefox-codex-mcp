@@ -16,7 +16,7 @@
   }
   function publicState() {
     if (prompt && Date.now() >= prompt.expiresAt) finishPrompt(false, prompt);
-    return { ...state, settings: { ...policy.settings }, sessionExpiresAt: policy.expiresAt, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
+    return { ...state, settings: { ...policy.settings }, sessionExpiresAt: policy.settings.contentMode === "ask-session" ? policy.expiresAt : null, fiveDayExpiresAt: policy.settings.contentMode === "ask-five-days" ? policy.expiresAt : null, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
   }
   function badge() {
     const status = iconStatus({ ...state, enabled: policy.settings.enabled });
@@ -73,6 +73,7 @@
   function disconnect() {
     abortWaits();
     service.clearExports?.();
+    service.clearHistorySnapshots?.();
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = null; finishPrompt(false);
     const oldPort = port; port = null;
@@ -89,7 +90,7 @@
       state.connected = true; state.connecting = false; state.lastError = null; retryDelay = 1000; badge(); return;
     }
     if (message.type === "cancel" && typeof message.id === "string") {
-      waits.get(message.id)?.abort(cancellation("CANCELLED", "Die Warteanfrage wurde abgebrochen."));
+      waits.get(message.id)?.abort(cancellation("CANCELLED", "Die Anfrage wurde abgebrochen."));
       return;
     }
     if (typeof message.id !== "string" || message.id.length > 128 || typeof message.method !== "string" || message.method.length > 64) return;
@@ -97,7 +98,7 @@
     catch (error) { send(target, { id: message.id, error: errorData(error) }); return; }
     if (pendingCount >= 32) { send(target, { id: message.id, error: { code: "BUSY", message: "Zu viele ausstehende Firefox-Anfragen." } }); return; }
     if (waits.has(message.id)) { send(target, { id: message.id, error: { code: "BUSY", message: "Diese Warteanfrage läuft bereits." } }); return; }
-    const controller = message.method === "wait_for" ? new AbortController() : null;
+    const controller = ["wait_for", "search_history"].includes(message.method) ? new AbortController() : null;
     if (controller) waits.set(message.id, controller);
     state.lastAccessAt = Date.now(); badge(); pendingCount += 1;
     const execute = async () => {
@@ -112,8 +113,8 @@
         send(target, { id: message.id, result: await service.handle(message.method, message.params ?? {}, { assertLive, signal: controller?.signal }) });
       } catch (error) { send(target, { id: message.id, error: errorData(error) }); }
     };
-    // Permission prompts do not hold status or tab-control requests in the queue.
-    if (["read_content", "save_png", "save_html", "save_pdf", "wait_for"].includes(message.method)) execute().finally(() => { pendingCount -= 1; if (controller) waits.delete(message.id); });
+    // Permission prompts and history scans do not hold tab-control requests in the queue.
+    if (["read_content", "save_png", "save_html", "save_pdf", "wait_for", "search_history"].includes(message.method)) execute().finally(() => { pendingCount -= 1; if (controller) waits.delete(message.id); });
     else queue = queue.then(execute).catch(() => {}).finally(() => { pendingCount -= 1; });
   }
   function connect() {
@@ -124,7 +125,7 @@
       current.onMessage.addListener(message => receive(current, message));
       current.onDisconnect.addListener(() => {
         if (port !== current) return;
-        port = null; abortWaits(); service.clearExports?.(); finishPrompt(false); state.connected = false; state.connecting = false;
+        port = null; abortWaits(); service.clearExports?.(); service.clearHistorySnapshots?.(); finishPrompt(false); state.connected = false; state.connecting = false;
         state.lastError = String(current.error?.message || "Native Host getrennt. Installation und Firefox-Profil prüfen.").slice(0, 1000);
         badge(); scheduleReconnect();
       });
@@ -140,14 +141,16 @@
       return Promise.resolve({ ok: finishPrompt(message.allowed, current) });
     }
     if (message.type === "bridge_status") return startup.then(publicState);
-    if (message.type === "bridge_reset_approvals") return startup.then(() => {
-      policy.resetApprovals(); service.clearExports?.(); finishPrompt(false); badge(); notifyPopup(); return publicState();
+    if (message.type === "bridge_reset_approvals") return startup.then(async () => {
+      policy.resetApprovals(); service.clearExports?.(); finishPrompt(false); badge(); notifyPopup();
+      await policy.flushApprovals(); return publicState();
     });
     if (message.type === "bridge_reconnect") return startup.then(() => { disconnect(); retryDelay = 1000; connect(); return publicState(); });
     if (message.type === "bridge_settings" && message.settings && typeof message.settings === "object") return startup.then(async () => {
       const before = JSON.stringify(policy.settings);
       const settings = policy.setSettings(normalizeSettings(message.settings));
       if (JSON.stringify(settings) !== before) { service.clearExports?.(); finishPrompt(false); }
+      await policy.flushApprovals();
       await browser.storage.local.set({ bridgeSettings: settings });
       if (!settings.enabled) disconnect(); else connect();
       badge(); return publicState();
@@ -156,7 +159,8 @@
   });
   const startup = (async () => {
     const saved = await browser.storage.local.get("bridgeSettings");
-    policy.setSettings(saved.bridgeSettings || {});
+    policy.setSettings(saved.bridgeSettings || {}, { persist: false });
+    await policy.restoreApprovals();
     await service.ready;
     connect(); badge();
   })().catch(error => { state.lastError = String(error.message || error).slice(0, 1000); badge(); });

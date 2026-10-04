@@ -172,6 +172,17 @@ test('a caller disconnected while streaming a body is never dispatched to Firefo
   assert.equal(f.commands.filter(command => command.id).length, 0);
 });
 
+test('history timeout cancels the native scan instead of leaving it running', async t => {
+  const f = await fixture(t, { timeoutMs: 20 });
+  f.send({ type: 'ready' });
+  const response = await f.request('/rpc', { method: 'search_history', params: { lastDays: 30 } });
+  assert.equal(response.status, 504);
+  assert.equal(response.body.error.code, 'TIMEOUT');
+  const scan = f.commands.find(command => command.method === 'search_history');
+  assert.ok(scan);
+  assert.deepEqual(f.commands.find(command => command.type === 'cancel'), { type: 'cancel', id: scan.id });
+});
+
 test('wait requests have bounded per-request native deadlines and successful waits are not cancelled', async t => {
   const f = await fixture(t, { timeoutMs: 1 });
   f.send({ type: 'ready' });

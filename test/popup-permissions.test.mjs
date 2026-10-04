@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../extension/popup.js', import.meta.url), 'utf8');
+const html = await readFile(new URL('../extension/popup.html', import.meta.url), 'utf8');
 const settle = async () => { for (let i = 0; i < 3; i++) await new Promise(resolve => setImmediate(resolve)); };
 function event() {
   const callbacks = new Set();
@@ -29,7 +30,7 @@ function mount({ granted = false, rejection = null, accepted = true, pendingAppr
     });
     return elements.get(id);
   };
-  const state = { settings: { enabled: true, contentMode: 'ask-session', contentScope: 'active' }, icon: { color: 'green', label: 'Ready' }, connected: true, sessionExpiresAt: null, lastAccessAt: null, lastError: null, version: '0.1.1', pendingApproval };
+  const state = { settings: { enabled: true, contentMode: 'ask-session', contentScope: 'active' }, icon: { color: 'green', label: 'Ready' }, connected: true, sessionExpiresAt: null, fiveDayExpiresAt: null, lastAccessAt: null, lastError: null, version: '0.1.1', pendingApproval };
   const browser = {
     runtime: {
       onMessage: event(),
@@ -43,7 +44,7 @@ function mount({ granted = false, rejection = null, accepted = true, pendingAppr
         }
         if (message.type === 'bridge_status' && statusResponses.length) return structuredClone(await statusResponses.shift());
         if (message.type === 'bridge_settings') state.settings = structuredClone(message.settings);
-        if (message.type === 'bridge_reset_approvals') { state.sessionExpiresAt = null; state.pendingApproval = null; }
+        if (message.type === 'bridge_reset_approvals') { state.sessionExpiresAt = null; state.fiveDayExpiresAt = null; state.pendingApproval = null; }
         return structuredClone(state);
       }
     },
@@ -166,6 +167,51 @@ test('individual tab approval names its exact URL scope and fixed session or one
   popup.setPending(approval({ id: 'one-read', scope: 'tab', mode: 'ask-every-time' })); popup.statusChanged(); await settle();
   assert.match(popup.el('approvalDescription').textContent, /Nur diese Anfrage.*diesen Tab.*genau.*URL.*erneut gefragt/u);
   assert.doesNotMatch(popup.el('approvalDescription').textContent, /12 Stunden/u);
+});
+
+test('five-day mode is available in the actual dropdown and selecting it only changes the rule', async () => {
+  assert.match(html, /<option value="ask-five-days">Für 5 Tage fragen \(neustartübergreifend\)<\/option>/u);
+  const popup = mount(); await settle();
+  await popup.changeSetting('contentMode', 'ask-five-days');
+  assert.equal(popup.el('contentMode').value, 'ask-five-days');
+  assert.deepEqual(popup.messages.filter(message => message.type === 'bridge_settings'), [{ type: 'bridge_settings', settings: { enabled: true, contentMode: 'ask-five-days', contentScope: 'active' } }]);
+  assert.equal(popup.state.fiveDayExpiresAt, null);
+  assert.match(popup.el('session').textContent, /Noch keine aktive 5-Tage-Freigabe.*nächsten Inhaltsanfrage/u);
+  assert.equal(popup.messages.some(message => message.type === 'approval_answer'), false);
+  assert.equal(popup.calls.length, 0);
+});
+
+test('five-day approval describes the fixed deadline and the requested active, all or exact-tab scope', async () => {
+  for (const [scope, expectedScope] of [['active', /aktiven Tab/u], ['all', /alle Tabs/u], ['tab', /diesen Tab.*genau.*URL/u]]) {
+    const popup = mount({ pendingApproval: approval({ mode: 'ask-five-days', scope }) }); await settle();
+    const description = popup.el('approvalDescription').textContent;
+    assert.match(description, expectedScope);
+    assert.match(description, /5 Tage \(120 Stunden\) ab Zustimmung.*Firefox- oder Erweiterungsneustart.*verlängert sich nicht.*Nach Ablauf/u);
+    assert.doesNotMatch(description, /Nur diese Anfrage|12 Stunden/u);
+    if (scope === 'tab') {
+      assert.match(description, /Andere Tabs und andere URLs benötigen eine eigene Freigabe/u);
+      assert.match(description, /an diesen Firefox-Tab gebunden.*Navigation, Neuladen, Entladen oder Schließen widerruft/u);
+      assert.doesNotMatch(description, /alle Tabs|aktiven Tab/u);
+    }
+  }
+});
+
+test('five-day status uses its own deadline and reset clears it without changing the rule', async () => {
+  const popup = mount(); await settle();
+  await popup.changeSetting('contentMode', 'ask-five-days');
+  const fiveDayExpiry = Date.now() + 120 * 60 * 60 * 1000;
+  popup.state.fiveDayExpiresAt = fiveDayExpiry;
+  popup.state.sessionExpiresAt = Date.now() + 12 * 60 * 60 * 1000;
+  popup.refresh(); await settle();
+  assert.equal(popup.el('session').textContent, `5-Tage-Freigabe bis ${new Date(fiveDayExpiry).toLocaleString('de-DE')}.`);
+  await popup.el('resetApprovals').listeners.get('click')();
+  assert.equal(popup.state.fiveDayExpiresAt, null);
+  assert.equal(popup.state.sessionExpiresAt, null);
+  assert.equal(popup.el('contentMode').value, 'ask-five-days');
+  assert.match(popup.el('session').textContent, /Noch keine aktive 5-Tage-Freigabe/u);
+  popup.state.fiveDayExpiresAt = 1;
+  popup.refresh(); await settle();
+  assert.match(popup.el('session').textContent, /Noch keine aktive 5-Tage-Freigabe/u);
 });
 
 test('reset button sends temporary-approval reset and immediately displays returned state', async () => {

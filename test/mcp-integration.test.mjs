@@ -54,7 +54,7 @@ test('real SDK stdio exposes all tools, forwards calls and rejects invalid schem
   t.after(() => new Promise(resolve => server.close(resolve)));
   const client = await connect(t, server.address().port);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 26);
+  assert.equal(tools.length, 33);
   assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.ok(client.getInstructions().includes('untrusted'));
   assert.equal(tools.find(tool => tool.name === 'firefox_close_tabs').annotations.destructiveHint, true);
@@ -91,6 +91,36 @@ test('real SDK stdio exposes all tools, forwards calls and rejects invalid schem
   assert.equal(requests.length, 5);
 });
 
+test('SDK exposes and validates all history/bookmark tools before forwarding exact IDs', async t => {
+  const requests = [];
+  const server = http.createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const request = JSON.parse(body); requests.push(request);
+    res.end(JSON.stringify({ result: request }));
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const client = await connect(t, server.address().port);
+  for (const [method, params] of [
+    ['search_history', { query: 'novel', lastHours: 48 }],
+    ['list_bookmark_folders', { recursive: false }], ['search_bookmarks', { parentId: 'toolbar_____', query: 'manga' }],
+    ['create_bookmark', { title: 'Novel', parentId: 'toolbar_____', url: 'https://example.com/' }],
+    ['update_bookmark', { id: 'opaque-id', title: 'Writing' }], ['move_bookmark', { id: 'opaque-id', index: 1 }],
+    ['delete_bookmark', { id: 'opaque-id', recursive: true }],
+  ]) {
+    const response = await client.callTool({ name: `firefox_${method}`, arguments: params });
+    assert.equal(response.isError, undefined);
+    assert.deepEqual(response.structuredContent.result, { method, params });
+  }
+  for (const [method, params] of [
+    ['search_history', { lastHours: 1, lastDays: 1 }], ['search_history', { snapshotId: 'x', query: 'changed' }],
+    ['create_bookmark', { type: 'folder', url: 'https://example.com/' }], ['update_bookmark', { id: 'x' }],
+    ['delete_bookmark', { id: 12 }],
+  ]) assert.equal((await client.callTool({ name: `firefox_${method}`, arguments: params })).isError, true);
+  assert.equal(requests.length, 7);
+});
+
 test('tool discovery works offline and a call gives an actionable isError response', async t => {
   const probe = http.createServer();
   probe.listen(0, '127.0.0.1');
@@ -98,7 +128,7 @@ test('tool discovery works offline and a call gives an actionable isError respon
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const client = await connect(t, port);
-  assert.equal((await client.listTools()).tools.length, 26);
+  assert.equal((await client.listTools()).tools.length, 33);
   const response = await client.callTool({ name: 'firefox_status', arguments: {} });
   assert.equal(response.isError, true);
   assert.equal(response.structuredContent.error.code, 'FIREFOX_OFFLINE');
@@ -117,7 +147,7 @@ test('stdio supports modern protocol discovery as well as legacy initialization'
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
   const client = await connect(t, server.address().port, 'auto');
-  assert.equal((await client.listTools()).tools.length, 26);
+  assert.equal((await client.listTools()).tools.length, 33);
   const response = await client.callTool({ name: 'firefox_status', arguments: {} });
   assert.deepEqual(response.structuredContent, { result: { connected: true } });
 });

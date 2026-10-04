@@ -10,6 +10,7 @@ const [backgroundSource, policySource, waitSource] = await Promise.all([
 ]);
 const settle = async () => { for (let index = 0; index < 5; index++) await new Promise(resolve => setImmediate(resolve)); };
 const clone = value => structuredClone(value);
+let persistentUuidSequence = 0;
 function event() {
   const listeners = new Set();
   return { addListener: callback => listeners.add(callback), removeListener: callback => listeners.delete(callback), emit: (...args) => [...listeners].map(callback => callback(...args)) };
@@ -20,8 +21,9 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 'normal', openError = false, focusError = false, noReceiver = false } = {}) {
-  let now = 10000, timerSequence = 0, requestSequence = 0, uuidSequence = 0, policy, reads = 0;
+async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 'normal', openError = false, focusError = false, noReceiver = false, savedState = null, startTime = 10000, tabSessionValues = new Map() } = {}) {
+  let now = startTime, timerSequence = 0, requestSequence = 0, uuidSequence = 0, policy, reads = 0;
+  const storageData = savedState || { bridgeSettings: { enabled: true, contentMode: mode, contentScope: scope } };
   const timers = new Map(), posted = [], calls = [], notifications = [];
   const normalWindow = { id: 7, type: 'normal', state: windowState, focused: false, tabs: [
     { id: 42, windowId: 7, active: true, status: 'complete', url: 'https://example.test/page', title: 'Example title' },
@@ -42,7 +44,12 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
       connectNative: () => port,
       sendMessage(message) { notifications.push(clone(message)); return noReceiver ? Promise.reject(new Error('No receiving end')) : Promise.resolve(); },
     },
-    storage: { local: { get: async () => ({ bridgeSettings: { enabled: true, contentMode: mode, contentScope: scope } }), set: async () => {} } },
+    storage: { local: { get: async () => clone(storageData), set: async values => { Object.assign(storageData, clone(values)); } } },
+    sessions: {
+      getTabValue: async (id, key) => clone(tabSessionValues.get(`${id}:${key}`)),
+      setTabValue: async (id, key, value) => { tabSessionValues.set(`${id}:${key}`, clone(value)); },
+      removeTabValue: async (id, key) => { tabSessionValues.delete(`${id}:${key}`); },
+    },
     browserAction: {
       setBadgeText: async value => { calls.push(['badge', clone(value)]); },
       setTitle: async value => { calls.push(['title', clone(value)]); },
@@ -66,7 +73,8 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
       remove: () => assert.fail('Approval must never remove a browser window.'),
     },
     tabs: {
-      onUpdated: event(), onRemoved: event(),
+      onCreated: event(), onUpdated: event(), onRemoved: event(),
+      query: async () => clone([...normalWindow.tabs, ...otherWindow.tabs]),
       get: async id => {
         const tab = [...normalWindow.tabs, ...otherWindow.tabs].find(candidate => candidate.id === id);
         if (!tab) throw new Error('Tab missing');
@@ -99,7 +107,9 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
   class Clock extends Date { static now() { return now; } }
   const realm = vm.createContext({
     browser, FirefoxBridgeCore: core, Date: Clock, AbortController, URL,
-    crypto: { randomUUID: () => `unique-approval-${++uuidSequence}` },
+    crypto: { randomUUID: () => storageData.bridgeSettings.contentMode === 'ask-five-days'
+      ? `00000000-0000-4000-8000-${String(++persistentUuidSequence).padStart(12, '0')}`
+      : `unique-approval-${++uuidSequence}` },
     setTimeout(callback, delay) { const id = ++timerSequence; timers.set(id, { callback, delay, expiresAt: now + delay }); return id; },
     clearTimeout: id => timers.delete(id), setInterval: () => 1,
   });
@@ -111,7 +121,7 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
   const sender = { id: browser.runtime.id, url: browser.runtime.getURL('popup.html') };
   const message = async (value, from = sender) => clone(await browser.runtime.onMessage.emit(value, from)[0]);
   return {
-    browser, port, policy, timers, posted, calls, notifications, sender,
+    browser, port, policy, timers, posted, calls, notifications, sender, storageData, tabSessionValues,
     reads: () => reads,
     message,
     status: () => message({ type: 'bridge_status' }),
@@ -431,6 +441,49 @@ test('concurrent content requests keep the first approval and reject the second'
   assert.deepEqual(await bridge.message({ type: 'approval_answer', id: first.id, allowed: true }), { ok: true });
   await settle();
   assert.equal(bridge.reads(), 1);
+});
+
+test('five-day approval is persisted before reading and restored before native requests after restart', async () => {
+  const duration = 5 * 24 * 60 * 60 * 1000;
+  const bridge = await mount({ mode: 'ask-five-days' });
+  assert.equal((await bridge.status()).fiveDayExpiresAt, null);
+  const first = await bridge.request();
+  const pending = (await bridge.status()).pendingApproval;
+  assert.equal(pending.mode, 'ask-five-days');
+  await bridge.message({ type: 'approval_answer', id: pending.id, allowed: true }); await settle();
+  assert.equal(bridge.posted.find(message => message.id === first)?.result?.authorized, true);
+  const expiresAt = 10000 + duration;
+  assert.equal((await bridge.status()).fiveDayExpiresAt, expiresAt);
+  assert.equal((await bridge.status()).sessionExpiresAt, null);
+  assert.ok(bridge.storageData.bridgeFiveDayApprovals);
+
+  const restarted = await mount({ savedState: bridge.storageData, startTime: 10000 + 48 * 60 * 60 * 1000 });
+  assert.equal((await restarted.status()).fiveDayExpiresAt, expiresAt);
+  const restoredRead = await restarted.request();
+  assert.equal(restarted.posted.find(message => message.id === restoredRead)?.result?.authorized, true);
+  assert.equal((await restarted.status()).pendingApproval, null);
+  assert.equal((await restarted.status()).fiveDayExpiresAt, expiresAt);
+  await restarted.advance(72 * 60 * 60 * 1000);
+  await restarted.request();
+  assert.equal((await restarted.status()).pendingApproval?.mode, 'ask-five-days');
+});
+
+test('reset and settings changes revoke persisted five-day approvals before returning', async () => {
+  for (const action of ['reset', 'scope', 'disable']) {
+    const bridge = await mount({ mode: 'ask-five-days' });
+    await bridge.request();
+    await bridge.message({ type: 'approval_answer', id: (await bridge.status()).pendingApproval.id, allowed: true }); await settle();
+    const response = action === 'reset'
+      ? await bridge.message({ type: 'bridge_reset_approvals' })
+      : await bridge.message({ type: 'bridge_settings', settings: { enabled: action !== 'disable', contentMode: 'ask-five-days', contentScope: action === 'scope' ? 'all' : 'active' } });
+    assert.equal(response.fiveDayExpiresAt, null);
+    const restarted = await mount({ savedState: bridge.storageData });
+    assert.equal((await restarted.status()).fiveDayExpiresAt, null);
+    if (action !== 'disable') {
+      await restarted.request();
+      assert.equal((await restarted.status()).pendingApproval?.mode, 'ask-five-days');
+    }
+  }
 });
 
 test('cancelling a wait dismisses its approval and cannot create a later session grant', async () => {

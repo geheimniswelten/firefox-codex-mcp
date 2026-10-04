@@ -1,7 +1,7 @@
-/* Shared as a plain background script and a side-effect module in Node tests. */
+﻿/* Shared as a plain background script and a side-effect module in Node tests. */
 (() => {
   "use strict";
-  const VERSION = "0.1.3";
+  const VERSION = "1.0.2";
   const SESSION_KEY = "firefox-codex-mcp.metadata.v1";
   const MAX_RESPONSE_BYTES = 800000; // Leave room for the native RPC envelope.
   const COLORS = ["blue", "cyan", "grey", "green", "orange", "pink", "purple", "red", "yellow"];
@@ -19,6 +19,11 @@
     status: [], get_current: [], list_windows: ["populate"],
     list_extensions: ["enabled", "type", "limit", "offset"],
     list_tabs: ["windowId", "active", "audible", "muted", "discarded", "groupId", "query", "searchIn", "matchMode", "caseSensitive", "limit", "offset"],
+    search_history: ["query", "searchIn", "matchMode", "caseSensitive", "lastHours", "lastDays", "from", "to", "limit", "offset", "snapshotId"],
+    list_bookmark_folders: ["parentId", "recursive", "limit", "offset"],
+    search_bookmarks: ["query", "searchIn", "matchMode", "caseSensitive", "parentId", "recursive", "limit", "offset"],
+    create_bookmark: ["title", "url", "parentId", "index", "type"],
+    update_bookmark: ["id", "title", "url"], move_bookmark: ["id", "parentId", "index"], delete_bookmark: ["id", "recursive"],
     get_tabs: ["tabIds"], create_tab: ["url", "windowId", "active", "pinned", "index"],
     update_tab: ["tabId", "url", "active", "pinned", "muted"], set_muted: ["tabIds", "muted"],
     close_tabs: ["tabIds"], move_tabs: ["tabIds", "windowId", "index"], discard_tabs: ["tabIds"], reload_tabs: ["tabIds", "bypassCache"],
@@ -40,6 +45,14 @@
     if (!own(METHODS, method)) throw new BridgeError("METHOD_NOT_FOUND", "Unbekannte Firefox-Methode.");
     if (!p || typeof p !== "object" || Array.isArray(p)) fail("params muss ein Objekt sein.");
     for (const key of Object.keys(p)) if (!METHODS[method].includes(key)) fail(`Unbekannter Parameter: ${key}`);
+    if (method === "search_history") {
+      if (!globalThis.FirefoxBridgeHistory) throw new BridgeError("UNSUPPORTED", "Chroniksuche benötigt die aktualisierte Firefox-Erweiterung.");
+      globalThis.FirefoxBridgeHistory.validate(p); return;
+    }
+    if (method.includes("bookmark")) {
+      if (!globalThis.FirefoxBridgeBookmarks) throw new BridgeError("UNSUPPORTED", "Lesezeichen benötigen die aktualisierte Firefox-Erweiterung.");
+      globalThis.FirefoxBridgeBookmarks.validate(method, p); return;
+    }
     if (method === "list_tabs") globalThis.FirefoxBridgeTabSearch.validateSearch(p);
     if (method === "wait_for") globalThis.FirefoxBridgeWait.validate(p);
     for (const key of ["tabId", "windowId", "groupId", "index", "limit", "offset", "maxChars"]) {
@@ -197,7 +210,7 @@
     let output = result;
     if (size(output) <= MAX_RESPONSE_BYTES) return output;
     // Reduce paginated pages before clipping strings, keeping the cursor exact.
-    const listKey = Array.isArray(output.tabs) ? "tabs" : Array.isArray(output.extensions) ? "extensions" : null;
+    const listKey = ["tabs", "extensions", "visits", "bookmarks", "folders"].find(key => Array.isArray(output[key]));
     if (listKey && own(output, "offset")) {
       output = { ...output, [listKey]: [...output[listKey]], truncated: true, truncationReason: "packet-size" };
       const candidates = output[listKey];
@@ -210,6 +223,7 @@
       output[listKey] = candidates.slice(0, low);
       output.returned = output[listKey].length;
       output.nextOffset = output.offset + output[listKey].length < output.total ? output.offset + output[listKey].length : null;
+      if (own(output, "hasMore")) output.hasMore = output.nextOffset !== null;
     }
     for (let max = 50000; size(output) > MAX_RESPONSE_BYTES && max >= 128; max = Math.floor(max / 2)) output = clip(output, max);
     if (truncatedStrings) output = { ...output, truncated: true, truncationReason: "packet-size", stringsTruncated: true };
@@ -229,6 +243,9 @@
   function createService(browser, options = {}) {
     const tracker = new Tracker(browser, options.now);
     const transfers = globalThis.FirefoxBridgeTransfers?.createTransfers({ now: options.now });
+    const searchOptions = { now: options.now, workerFactory: options.searchWorkerFactory || (() => new Worker(browser.runtime.getURL("tab-search-worker.js"))) };
+    const history = globalThis.FirefoxBridgeHistory?.createHistory(browser, searchOptions);
+    const bookmarks = globalThis.FirefoxBridgeBookmarks?.createBookmarks(browser, searchOptions);
     const exporting = new Set();
     const ready = tracker.start();
     const groupApi = () => {
@@ -256,7 +273,7 @@
         case "status": {
           const permissions = browser.permissions?.getAll ? await browser.permissions.getAll() : {};
           const technicalAllowed = permissions.data_collection?.includes("technicalAndInteraction");
-          return { version: VERSION, connected: true, nativeGroups: Boolean(browser.tabGroups && browser.tabs.group), exports: { png: Boolean(transfers && globalThis.FirefoxBridgePng && browser.tabs.captureTab), html: Boolean(transfers && globalThis.FirefoxBridgeHtml), pdf: Boolean(globalThis.FirefoxBridgePdf && browser.tabs.saveAsPDF), pdfDestination: "save-dialog" }, tracking: "session-tab-values", createdAtSemantics: "Observed onCreated time; pre-existing unknown; restored metadata retained.", discardAttribution: "Only successful discards from this extension can be attributed. Firefox and Auto Tab Discard share discarded state.", ...(technicalAllowed && browser.runtime.getBrowserInfo ? { browser: await browser.runtime.getBrowserInfo() } : {}) };
+          return { version: VERSION, connected: true, nativeGroups: Boolean(browser.tabGroups && browser.tabs.group), history: Boolean(history && browser.history?.search && browser.history?.getVisits), bookmarks: Boolean(bookmarks && browser.bookmarks?.getTree), exports: { png: Boolean(transfers && globalThis.FirefoxBridgePng && browser.tabs.captureTab), html: Boolean(transfers && globalThis.FirefoxBridgeHtml), pdf: Boolean(globalThis.FirefoxBridgePdf && browser.tabs.saveAsPDF), pdfDestination: "save-dialog" }, tracking: "session-tab-values", createdAtSemantics: "Observed onCreated time; pre-existing unknown; restored metadata retained.", discardAttribution: "Only successful discards from this extension can be attributed. Firefox and Auto Tab Discard share discarded state.", ...(technicalAllowed && browser.runtime.getBrowserInfo ? { browser: await browser.runtime.getBrowserInfo() } : {}) };
         }
         case "get_current": {
           const window = options.contentAccess ? await options.contentAccess.getCurrentWindow() : await browser.windows.getLastFocused({ populate: true, windowTypes: ["normal"] });
@@ -290,6 +307,9 @@
           const page = tabs.slice(offset, offset + limit);
           return { tabs: await Promise.all(page.map(tab => tracker.format(tab))), total: tabs.length, offset, limit, returned: page.length, nextOffset: offset + page.length < tabs.length ? offset + page.length : null };
         }
+        case "search_history": return history.search(p, context);
+        case "list_bookmark_folders": case "search_bookmarks": case "create_bookmark":
+        case "update_bookmark": case "move_bookmark": case "delete_bookmark": return bookmarks.handle(method, p, context);
         case "get_tabs": return batch(p.tabIds, getTab, context.assertLive);
         case "create_tab": return tracker.format(await browser.tabs.create(p));
         case "update_tab": return tracker.format(await browser.tabs.update(p.tabId, pick(p, ["url", "active", "pinned", "muted"])));
@@ -358,7 +378,7 @@
             if (access?.tabRevisions && (access.tabRevisions.get(p.tabId) || 0) !== tabRevision) throw new BridgeError("PAGE_CHANGED", "Die Seite wurde seit der Inhaltsfreigabe gewechselt.");
             const grant = access?.authorizations?.get(authorization);
             if (grant) access.assertGrant(grant, p.tabId, authorizedUrl, revision);
-            else if (access?.settings?.contentMode === "ask-session" && (access.expiresAt === null || access.now() >= access.expiresAt)) throw new BridgeError("SESSION_EXPIRED", "Die Inhaltsfreigabe ist während des Exports abgelaufen.");
+            else if (["ask-session", "ask-five-days"].includes(access?.settings?.contentMode) && (access.expiresAt === null || access.now() >= access.expiresAt)) throw new BridgeError("SESSION_EXPIRED", "Die Inhaltsfreigabe ist während des Exports abgelaufen.");
           };
           const assertAccess = async () => {
             const current = options.contentAccess
@@ -432,7 +452,7 @@
         }
       }
     }
-    return { ready, tracker, clearExports: () => transfers?.clear(), handle: async (method, params, context) => {
+    return { ready, tracker, clearExports: () => transfers?.clear(), clearHistorySnapshots: () => history?.clear(), handle: async (method, params, context) => {
       const result = await handle(method, params, context);
       // Binary blocks must never pass through generic string clipping.
       if (method === "export_chunk") {

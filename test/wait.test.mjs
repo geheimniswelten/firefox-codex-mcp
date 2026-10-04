@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import '../extension/wait.js';
+import '../extension/policy.js';
 
 const { validate, waitFor } = globalThis.FirefoxBridgeWait;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -78,6 +79,27 @@ function access(browser) {
     }
   };
 }
+
+test('a five-day content approval expiring during a DOM probe cannot return conditions', async () => {
+  const browser = fakeBrowser();
+  const duration = globalThis.FirefoxBridgePolicy.FIVE_DAYS_MS;
+  let now = 10000;
+  browser.tab.active = true; browser.tab.windowId = 1;
+  browser.windows = {
+    onFocusChanged: event(),
+    getLastFocused: async () => ({ id: 1, type: 'normal', tabs: [structuredClone(browser.tab)] }),
+    get: async () => ({ id: 1, type: 'normal', tabs: [structuredClone(browser.tab)] }),
+    getAll: async () => [{ id: 1, type: 'normal', tabs: [structuredClone(browser.tab)] }],
+  };
+  browser.storage = { local: { get: async () => ({}), set: async () => {} } };
+  const policy = new globalThis.FirefoxBridgePolicy.ContentAccess(browser, {
+    now: () => now, settings: { enabled: true, contentMode: 'ask-five-days', contentScope: 'all' }, requestApproval: async () => true,
+  });
+  browser.state.afterProbe = () => { now += duration; };
+  await assert.rejects(waitFor(browser, { tabId: 1, selector: '#target', timeoutMs: 1000 }, { contentAccess: policy }), { code: 'SESSION_EXPIRED' });
+  assert.equal(browser.state.trace.filter(item => item === 'probe').length, 1);
+  policy.windowTracker.stop();
+});
 
 test('wait validation normalizes exact URLs, defaults and only active conditions', () => {
   assert.deepEqual(validate({ tabId: 0, url: 'HTTPS://Example.TEST:443', imagesLoaded: false }), { tabId: 0, timeoutMs: 10000, url: 'https://example.test/' });

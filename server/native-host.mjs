@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { configPathFromArgs, loadConfig } from './config.mjs';
 import { encodeNativeMessage, NativeDecoder } from './framing.mjs';
 
-const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','wait_for','save_png','save_html','save_pdf','export_chunk','export_release']);
+const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','search_history','list_bookmark_folders','search_bookmarks','create_bookmark','update_bookmark','move_bookmark','delete_bookmark','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','wait_for','save_png','save_html','save_pdf','export_chunk','export_release']);
 const error = (code, message) => ({ error: { code, message } });
 const waitTimeoutMs = params => Number.isInteger(params.timeoutMs) && params.timeoutMs >= 1 && params.timeoutMs <= 120_000 ? params.timeoutMs : 10_000;
 
@@ -24,7 +24,7 @@ export function createBridge({ port, token, input = process.stdin, output = proc
   const expectedAuth = Buffer.from(`Bearer ${token}`);
   const send = message => output.write(encodeNativeMessage(message));
   const cancelWait = (id, method) => {
-    if (method !== 'wait_for' || closed || !ready) return;
+    if (!['wait_for', 'search_history'].includes(method) || closed || !ready) return;
     try { send({ type: 'cancel', id }); } catch { /* Caller cleanup does not depend on native output. */ }
   };
   const cancelAll = () => {
@@ -63,7 +63,7 @@ export function createBridge({ port, token, input = process.stdin, output = proc
       reply(response, 401, error('UNAUTHORIZED', 'Bridge authentication failed.')); return;
     }
     if (request.method === 'GET' && request.url === '/health') {
-      reply(response, 200, { result: { connected: ready, version: '0.1.3' } }); return;
+      reply(response, 200, { result: { connected: ready, version: '1.0.2' } }); return;
     }
     if (request.method !== 'POST' || request.url !== '/rpc') {
       reply(response, 404, error('NOT_FOUND', 'Unknown bridge endpoint.')); return;

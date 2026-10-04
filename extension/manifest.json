@@ -1,20 +1,20 @@
-{
+﻿{
   "manifest_version": 2,
   "name": "Firefox ↔ Codex MCP",
-  "version": "0.1.3",
-  "description": "Lokale MCP-Verbindung für Fenster, Tabs, native Tabgruppen, Seiteninhalte sowie PNG-, HTML- und PDF-Export.",
+  "version": "1.0.2",
+  "description": "Lokale MCP-Verbindung für Tabs, Fenster, Tabgruppen, Chronik, Lesezeichen, Seiteninhalte und Export.",
   "browser_specific_settings": {
     "gecko": {
       "id": "firefox-codex-mcp@local.invalid",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
-        "required": ["browsingActivity", "websiteContent"],
+        "required": ["browsingActivity", "websiteContent", "bookmarksInfo"],
         "optional": ["technicalAndInteraction"]
       }
     }
   },
-  "permissions": ["tabs", "tabGroups", "sessions", "storage", "nativeMessaging", "management", "<all_urls>"],
-  "background": {"scripts": ["policy.js", "export-transfers.js", "png-export.js", "html-export.js", "pdf-export.js", "tab-search.js", "wait.js", "core.js", "background.js"], "persistent": true},
+  "permissions": ["tabs", "tabGroups", "sessions", "storage", "nativeMessaging", "management", "history", "bookmarks", "<all_urls>"],
+  "background": {"scripts": ["policy.js", "export-transfers.js", "png-export.js", "html-export.js", "pdf-export.js", "tab-search.js", "history.js", "bookmarks.js", "wait.js", "core.js", "background.js"], "persistent": true},
   "browser_action": {
     "default_title": "Firefox ↔ Codex MCP",
     "default_popup": "popup.html",
