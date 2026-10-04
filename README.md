@@ -1,15 +1,30 @@
-### Kurz
+### [DE] Kurz
 
-- Firefox mit KI verwalten: Tabs/Fenster/Plugins suchen/durchsuchen/schließen/verschieben/...
-   - Chronik nach Titel, URL und Zeitraum durchsuchen; Lesezeichen und Ordner einschließlich Symbolleiste suchen, anlegen, bearbeiten, verschieben und löschen
-   - Codex, Claude Code (CLI / VS Code), Claude Desktop, Eigent, Gemini CLI / Code Assist, Gemini Desktop, Hermes, LM Studio and OpenClaw
-- Die Erweiterung ist derzeit **unsigniert**. Einrichtung im Add-on und Pakete für eine spätere AMO-Einreichung sind vorbereitet; eine signierte XPI oder Veröffentlichung wurde noch nicht erstellt.
-- Für den bisherigen Entwicklungsweg downloaden und install.cmd ausführen
+- Firefox mit KI verwalten: Tabs/Fenster/Chronic/Lesezeichen/Favoriten/Plugins suchen/durchsuchen/schließen/verschieben/...
+   - Tabs/Chronik nach Titel, URL und Zeitraum durchsuchen; Lesezeichen und Ordner einschließlich Symbolleiste suchen, anlegen, bearbeiten, verschieben und löschen.
+   - Codex, Claude Code (CLI / VS Code), Claude Desktop, Eigent, Gemini CLI / Code Assist, Gemini Desktop, Hermes, LM Studio und OpenClaw.
+- Für den bisherigen Entwicklungsweg downloaden und install.cmd ausführen (leider nach jedem Browser-Neustart erneut)
    - in about:debugging#/runtime/this-firefox "Temporäres Add-on laden" -> ...\firefox-codex-mcp\extension\manifest.json
    - alternativ im geladenen Add-on die Einrichtungsseite öffnen, das passende Registrierungsskript herunterladen und außerhalb von Firefox ausführen
+   - [XPI](https://addons.mozilla.org/firefox/downloads/file/5085935/98f93549b0104dbda62c-1.0.2.xpi) dauerhaft installieren und Registrierungsskript ausführen
 - Desktop-Firefox unter Windows, Linux und macOS; ein lokaler Native-Messaging-Helfer ist erforderlich
 - Zugriff auf Seiteninhalte standardmäßig gesperrt (bei Erstzugriff wird nach Freigabe gefragt)
 - Export von Webseiten als PNG und Single-HTML (auch als PDF -> öffnet aber nur den Speichern-Dialog des FF)
+- Debugfunktionen: Zugriff auf Seiteninhalte, aber vor allem auch um lokal Webseiten zu entwickeln und zu testen.
+
+### [EN] Short
+
+- Manage Firefox with AI: find, search, close, move, and organize tabs/windows/history/bookmarks/favorites/add-ons.
+   - Search tabs and browsing history by title, URL, and time period; find, create, edit, move, and delete bookmarks and folders, including those on the bookmarks toolbar.
+   - Codex, Claude Code (CLI / VS Code), Claude Desktop, Eigent, Gemini CLI / Code Assist, Gemini Desktop, Hermes, LM Studio, and OpenClaw.
+- For the existing development workflow, download the project and run `install.cmd` (unfortunately, temporary add-ons must be reloaded after every browser restart).
+   - Open `about:debugging#/runtime/this-firefox`, select "Load Temporary Add-on", and choose `...\firefox-codex-mcp\extension\manifest.json`.
+   - Alternatively, open the setup page in the loaded add-on, download the appropriate registration script, and run it outside Firefox.
+   - For permanent installation, install the [XPI](https://addons.mozilla.org/firefox/downloads/file/5085935/98f93549b0104dbda62c-1.0.2.xpi) and run the registration script.
+- Desktop Firefox on Windows, Linux, and macOS; a local native messaging helper is required.
+- Access to page content is blocked by default (approval is requested on first access).
+- Export webpages as PNG or a single HTML file (PDF export is also available and opens Firefox's Save dialog).
+- Debugging features: access page content, particularly for developing and testing websites locally.
 
 # Firefox ↔ Codex MCP
 
