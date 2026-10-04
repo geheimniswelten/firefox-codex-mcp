@@ -2,6 +2,7 @@ import http from 'node:http';
 
 const MAX_PACKET_BYTES = 900_000;
 const MAX_REQUEST_BYTES = 65_536;
+const waitTimeoutMs = params => Number.isInteger(params.timeoutMs) && params.timeoutMs >= 1 && params.timeoutMs <= 120_000 ? params.timeoutMs : 10_000;
 
 export class BridgeError extends Error {
   constructor(code, message, details) {
@@ -116,7 +117,7 @@ export function createBridgeClient({ port, token }, { timeoutMs = 35_000, conten
         const timer = setTimeout(() => {
           finish(new BridgeError('BRIDGE_TIMEOUT', 'Firefox did not respond in time. The action may have completed; inspect the current state before retrying a change.'));
           req.destroy();
-        }, method === 'read_content' ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(method) ? exportTimeoutMs : timeoutMs);
+        }, method === 'wait_for' ? waitTimeoutMs(params) + 10_000 : method === 'read_content' ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(method) ? exportTimeoutMs : timeoutMs);
         const onAbort = () => {
           finish(new BridgeError('CANCELLED', 'The request was cancelled. Firefox may already have applied the action; inspect the current state before retrying.'));
           req.destroy();

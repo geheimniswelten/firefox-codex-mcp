@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 const definitions = new Map(TOOL_DEFINITIONS.map(tool => [tool.method, tool]));
 const valid = (method, args) => definitions.get(method).inputSchema.safeParse(args).success;
 
-test('the 25 documented tools have complete annotations and strict object schemas', () => {
-  assert.equal(definitions.size, 25);
+test('the 26 documented tools have complete annotations and strict object schemas', () => {
+  assert.equal(definitions.size, 26);
   for (const tool of definitions.values()) {
     assert.equal(tool.name, `firefox_${tool.method}`);
     assert.ok(tool.description.length > 20);
@@ -25,6 +25,21 @@ test('the 25 documented tools have complete annotations and strict object schema
   assert.match(SERVER_INSTRUCTIONS, /untrusted/);
   assert.match(SERVER_INSTRUCTIONS, /firstSeenAt/);
   assert.match(SERVER_INSTRUCTIONS, /Auto Tab Discard/);
+});
+
+test('wait conditions require an active predicate and bound timeout and page inputs', () => {
+  assert.equal(definitions.get('wait_for').annotations.readOnlyHint, true);
+  for (const args of [
+    { url: 'https://example.com/' }, { url: 'about:blank', loadComplete: true },
+    { selector: 'main .ready', imagesLoaded: true, fontsLoaded: true, timeoutMs: 120000 },
+    { loadComplete: true, imagesLoaded: false, timeoutMs: 1 },
+  ]) assert.ok(valid('wait_for', { tabId: 1, ...args }));
+  for (const args of [
+    {}, { imagesLoaded: false, fontsLoaded: false, loadComplete: false },
+    { selector: '' }, { selector: 'a'.repeat(4097) }, { url: 'javascript:alert(1)' }, { url: ' https://example.com/' },
+    { imagesLoaded: 'true' }, { loadComplete: 1 }, { fontsLoaded: null },
+    ...[0, -1, 120001, 1.5, '10000'].map(timeoutMs => ({ loadComplete: true, timeoutMs })),
+  ]) assert.equal(valid('wait_for', { tabId: 1, ...args }), false, JSON.stringify(args));
 });
 
 test('exports require caller-owned absolute destinations and expose no internal transfer tools', () => {

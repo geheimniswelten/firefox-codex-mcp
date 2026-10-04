@@ -8,6 +8,12 @@
   const state = { connected: false, connecting: false, lastError: null, lastAccessAt: null, version: VERSION };
   let port = null, reconnectTimer = null, retryDelay = 1000, pendingCount = 0, prompt = null;
   let queue = Promise.resolve();
+  const waits = new Map();
+  const cancellation = (code, message) => Object.assign(new Error(message), { code });
+  function abortWaits() {
+    for (const controller of waits.values()) controller.abort(cancellation("MCP_DISABLED", "Die MCP-Verbindung wurde beendet."));
+    waits.clear();
+  }
   function publicState() {
     if (prompt && Date.now() >= prompt.expiresAt) finishPrompt(false, prompt);
     return { ...state, settings: { ...policy.settings }, sessionExpiresAt: policy.expiresAt, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
@@ -26,6 +32,7 @@
     if (!current || prompt !== current) return false;
     prompt = null;
     clearTimeout(current.timer);
+    current.signal?.removeEventListener("abort", current.onAbort);
     badge(); notifyPopup(); current.resolve(allowed);
     return true;
   }
@@ -45,13 +52,15 @@
     try { await browser.browserAction.openPopup({ windowId: window.id }); }
     catch { /* Older Firefox versions may require the user's toolbar click. */ }
   }
-  async function requestApproval(request) {
-    if (prompt || !policy.settings.enabled) return false;
+  async function requestApproval(request, { signal } = {}) {
+    if (prompt || !policy.settings.enabled || signal?.aborted) return false;
     return new Promise(resolve => {
       const id = crypto.randomUUID();
-      const current = { id, request: { ...request }, resolve, expiresAt: Date.now() + 120000 };
+      const current = { id, request: { ...request }, resolve, expiresAt: Date.now() + 120000, signal };
       prompt = current;
       current.timer = setTimeout(() => finishPrompt(false, current), 120000);
+      current.onAbort = () => finishPrompt(false, current);
+      signal?.addEventListener("abort", current.onAbort, { once: true });
       badge(); notifyPopup();
       void openApprovalPopup(current);
     });
@@ -62,6 +71,7 @@
     retryDelay = Math.min(retryDelay * 2, 30000);
   }
   function disconnect() {
+    abortWaits();
     service.clearExports?.();
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = null; finishPrompt(false);
@@ -78,24 +88,32 @@
     if (message.type === "connected") {
       state.connected = true; state.connecting = false; state.lastError = null; retryDelay = 1000; badge(); return;
     }
+    if (message.type === "cancel" && typeof message.id === "string") {
+      waits.get(message.id)?.abort(cancellation("CANCELLED", "Die Warteanfrage wurde abgebrochen."));
+      return;
+    }
     if (typeof message.id !== "string" || message.id.length > 128 || typeof message.method !== "string" || message.method.length > 64) return;
     try { validate(message.method, message.params ?? {}); }
     catch (error) { send(target, { id: message.id, error: errorData(error) }); return; }
     if (pendingCount >= 32) { send(target, { id: message.id, error: { code: "BUSY", message: "Zu viele ausstehende Firefox-Anfragen." } }); return; }
+    if (waits.has(message.id)) { send(target, { id: message.id, error: { code: "BUSY", message: "Diese Warteanfrage läuft bereits." } }); return; }
+    const controller = message.method === "wait_for" ? new AbortController() : null;
+    if (controller) waits.set(message.id, controller);
     state.lastAccessAt = Date.now(); badge(); pendingCount += 1;
     const execute = async () => {
       if (!policy.settings.enabled || port !== target) return;
       const assertLive = () => {
+        if (controller?.signal.aborted) throw controller.signal.reason;
         if (!policy.settings.enabled || port !== target) throw Object.assign(new Error("Die MCP-Verbindung wurde beendet."), { code: "MCP_DISABLED" });
         if (Number.isFinite(message.expiresAt) && Date.now() >= message.expiresAt) throw Object.assign(new Error("Die Anfrage ist abgelaufen und wurde nicht ausgeführt."), { code: "REQUEST_EXPIRED" });
       };
       try {
         assertLive();
-        send(target, { id: message.id, result: await service.handle(message.method, message.params ?? {}, { assertLive }) });
+        send(target, { id: message.id, result: await service.handle(message.method, message.params ?? {}, { assertLive, signal: controller?.signal }) });
       } catch (error) { send(target, { id: message.id, error: errorData(error) }); }
     };
     // Permission prompts do not hold status or tab-control requests in the queue.
-    if (["read_content", "save_png", "save_html", "save_pdf"].includes(message.method)) execute().finally(() => { pendingCount -= 1; });
+    if (["read_content", "save_png", "save_html", "save_pdf", "wait_for"].includes(message.method)) execute().finally(() => { pendingCount -= 1; if (controller) waits.delete(message.id); });
     else queue = queue.then(execute).catch(() => {}).finally(() => { pendingCount -= 1; });
   }
   function connect() {
@@ -106,7 +124,7 @@
       current.onMessage.addListener(message => receive(current, message));
       current.onDisconnect.addListener(() => {
         if (port !== current) return;
-        port = null; service.clearExports?.(); finishPrompt(false); state.connected = false; state.connecting = false;
+        port = null; abortWaits(); service.clearExports?.(); finishPrompt(false); state.connected = false; state.connecting = false;
         state.lastError = String(current.error?.message || "Native Host getrennt. Installation und Firefox-Profil prüfen.").slice(0, 1000);
         badge(); scheduleReconnect();
       });

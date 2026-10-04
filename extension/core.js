@@ -26,6 +26,7 @@
     list_groups: ["windowId"], group_tabs: ["tabIds", "groupId", "windowId", "title", "color", "collapsed"],
     ungroup_tabs: ["tabIds"], update_group: ["groupId", "title", "color", "collapsed"], move_group: ["groupId", "windowId", "index"],
     read_content: ["tabId", "format", "selector", "maxChars", "includeLinks"],
+    wait_for: ["tabId", "url", "selector", "imagesLoaded", "fontsLoaded", "loadComplete", "timeoutMs"],
     save_png: ["tabId", "fullPage", "loadDeferred", "maxHeight"], save_html: ["tabId", "loadDeferred"], save_pdf: ["tabId"],
     export_chunk: ["transferId", "index"], export_release: ["transferId"]
   };
@@ -40,6 +41,7 @@
     if (!p || typeof p !== "object" || Array.isArray(p)) fail("params muss ein Objekt sein.");
     for (const key of Object.keys(p)) if (!METHODS[method].includes(key)) fail(`Unbekannter Parameter: ${key}`);
     if (method === "list_tabs") globalThis.FirefoxBridgeTabSearch.validateSearch(p);
+    if (method === "wait_for") globalThis.FirefoxBridgeWait.validate(p);
     for (const key of ["tabId", "windowId", "groupId", "index", "limit", "offset", "maxChars"]) {
       if (!own(p, key)) continue;
       const min = (key === "index" || (key === "groupId" && method === "list_tabs")) ? -1 : 0;
@@ -407,6 +409,7 @@
             return transfers.put(bytes, { tabId: p.tabId, url: authorizedUrl, mimeType: method === "save_png" ? "image/png" : "text/html", ...(method === "save_png" ? pick(result, ["width", "height", "scale", "fullPage"]) : {}), warnings: (result.warnings || []).slice(0, 50).map(warning => String(warning).slice(0, 2000)), untrustedContent: true }, assertAccess);
           } finally { exporting.delete(p.tabId); }
         }
+        case "wait_for": return globalThis.FirefoxBridgeWait.waitFor(browser, p, { contentAccess: options.contentAccess, assertLive: context.assertLive, signal: context.signal });
         case "read_content": {
           let tab = await browser.tabs.get(p.tabId);
           if (tab.discarded) throw new BridgeError("TAB_DISCARDED", "Tab ist entladen. Erst ausdrücklich reload_tabs aufrufen, dann erneut lesen.");

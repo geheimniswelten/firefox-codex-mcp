@@ -102,14 +102,19 @@
       if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Zugriffseinstellungen wurden während der Anfrage geändert.");
       return tab;
     }
-    async authorize(tab, authorization = {}) {
+    async authorize(tab, authorization = {}, { signal } = {}) {
+      const assertPending = () => { if (signal?.aborted) throw signal.reason || accessError("CANCELLED", "Die Inhaltsanfrage wurde abgebrochen."); };
+      assertPending();
       this.authorizations.delete(authorization);
       const revision = this.revision, tabRevision = this.tabRevisions.get(tab.id) || 0;
       await this.assertTarget(tab.id, tab.url, revision);
+      assertPending();
       const mode = this.settings.contentMode;
       if (mode === "deny") throw accessError("CONTENT_DENIED", "Inhaltszugriff ist in der Erweiterung gesperrt.");
       const tabScoped = this.settings.contentScope === "active" && !await this.isActiveTab(tab.id);
+      assertPending();
       await this.assertTarget(tab.id, tab.url, revision);
+      assertPending();
       if (this.settings.contentScope === "active") {
         const grant = this.tabGrants.get(tab.id);
         if (mode === "ask-session" && grant?.url === tab.url && grant.revision === revision && grant.tabRevision === tabRevision && this.now() < grant.expiresAt) {
@@ -119,17 +124,20 @@
       }
       if (!tabScoped) {
         await this.assertScope(tab.id, tab.url, revision);
+        assertPending();
         if (mode === "allow") return this.assertScope(tab.id, tab.url, revision);
         if (mode === "ask-session" && this.expiresAt !== null && this.now() < this.expiresAt) return this.assertScope(tab.id, tab.url, revision);
       }
       if (this.promptPending) throw accessError("APPROVAL_BUSY", "Eine Inhaltsfreigabe wartet bereits auf eine Antwort.");
       this.promptPending = true;
       let allowed;
-      try { allowed = await this.requestApproval({ tabId: tab.id, url: tab.url, title: tab.title || "", mode: tabScoped && mode === "allow" ? "ask-every-time" : mode, scope: tabScoped ? "tab" : this.settings.contentScope }); }
+      try { allowed = await this.requestApproval({ tabId: tab.id, url: tab.url, title: tab.title || "", mode: tabScoped && mode === "allow" ? "ask-every-time" : mode, scope: tabScoped ? "tab" : this.settings.contentScope }, { signal }); }
       finally { this.promptPending = false; }
+      assertPending();
       if (!allowed) throw accessError("CONTENT_DENIED", "Inhaltszugriff wurde nicht freigegeben.");
       if (tabScoped) {
         await this.assertTarget(tab.id, tab.url, revision);
+        assertPending();
         if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Freigabe wurde während der Anfrage widerrufen.");
         if (tabRevision !== (this.tabRevisions.get(tab.id) || 0)) throw accessError("PAGE_CHANGED", "Die Seite wurde während der Freigabe gewechselt. Erneut anfragen.");
         const grant = { tabId: tab.id, url: tab.url, revision, tabRevision, expiresAt: mode === "ask-session" ? this.now() + SESSION_MS : null };
@@ -138,6 +146,7 @@
         return this.assertScope(tab.id, tab.url, revision, authorization);
       }
       const current = await this.assertScope(tab.id, tab.url, revision);
+      assertPending();
       if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Freigabe wurde während der Anfrage widerrufen.");
       if (mode === "ask-session") this.expiresAt = this.now() + SESSION_MS;
       return current;

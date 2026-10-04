@@ -1,5 +1,15 @@
 # Prüfstand vom 4. Oktober 2026
 
+## Warten auf Seitenzustände mit `firefox_wait_for`
+
+Das 26. MCP-Werkzeug `firefox_wait_for` wartet auf die UND-Verknüpfung von exakter kanonisierter URL, Firefox-Ladestatus und gewählten Hauptdokument-Bedingungen für sichtbare Selektortreffer, Bilder und Schriften. Metadatenbedingungen benötigen keine Inhaltsfreigabe; DOM-Bedingungen warten zunächst auf Tabstatus `complete` und verwenden dann die bestehenden Inhaltsregeln. Die gesamte Frist einschließlich Freigabe beträgt standardmäßig 10000 ms und ist von 1 bis 120000 ms einstellbar. Native Host und MCP-Client geben dieser Frist 5 beziehungsweise 10 Sekunden zusätzlichen Transportpuffer; Abbruch beendet die Warteschleife und eine zugehörige offene Inhaltsabfrage.
+
+Der abschließende vollständige Node-Lauf mit `--test-concurrency=2` bestand mit **236 erfolgreichen Tests, 0 Fehlern und 1 bestehenden ACL-Skip** (237 insgesamt). Die Syntax von **97 JavaScript-Dateien** und die Manifestkonsistenz wurden erfolgreich geprüft. Mozilla `web-ext lint` meldete **0 Fehler, 0 Hinweise und die bestehenden 19 Warnungen** zu Android und mitgeliefertem SingleFile-Code. `git diff --check` war sauber.
+
+Der zusätzliche isolierte Headless-Lauf mit **Firefox 157.0** bestand mit **31 Prüfungen**. Er prüfte eine zunächst abweichende URL, verzögerte Sichtbarkeit unter mehreren Selektortreffern, sichtbare Elemente außerhalb des Bildausschnitts ohne Scrollen, erfolgreiche und kaputte Bilder, angeforderte und ungenutzte Schriften sowie die UND-Verknüpfung aller Bedingungen. Die lokale HTTP-Testseite verzögerte Bild- und Schriftantworten um 300 ms; die Schrift wurde als `FontFace` aus der lokalen Arial-Datei angefordert. Ungültige CSS-Selektoren, `PAGE_CHANGED` nach Neuladen, `WAIT_TIMEOUT`, Abbruch über `AbortSignal` und das Freigeben des offenen Approval-Slots nach Abbruch oder Timeout funktionierten.
+
+Die produktiven Inhaltsregeln wurden auch mit verweigertem DOM-Zugriff, erlaubtem reinem Metadatenzugriff trotz Sperre und einer Freigabe für den anderen Tab ohne Aktivierung geprüft. Freigabeantworten kamen dabei von einem Testadapter; ein echtes Freigabepopup und die vollständige MCP-Abbruchstrecke wurden in diesem Browserlauf nicht bedient. Letztere sind Teil der automatisierten Node-Prüfungen. Das Benutzerprofil und der Native Host wurden nicht verwendet. Wiederholbar mit `npm run test:firefox-wait`; Report und Browserlog liegen unter `work/wait-firefox-65e06cc8-3a04-46b0-adaa-eb4ec93663ae/`.
+
 ## Codex-Registrierung bei gemischten Zeilenumbrüchen
 
 Die Installationswarnung „Der verwaltete TOML-Block ist unvollstaendig“ entstand bei einer vollständigen, korrekt registrierten Firefox-Konfiguration mit LF-Zeilenumbrüchen im eigenen Block und CRLF-Zeilenumbrüchen in anderen Teilen der Datei. Der Installer suchte den Abschlussmarker mit dem global erkannten Zeilenumbruch. Er erkennt die Marker jetzt unabhängig davon und akzeptiert den Abschlussmarker auch am Dateiende ohne folgenden Zeilenumbruch. Prüfsumme und erwarteter Blockinhalt bleiben strikt geprüft; fremde oder geänderte Einträge werden weiterhin nicht übernommen.

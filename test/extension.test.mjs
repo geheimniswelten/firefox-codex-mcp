@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
 import '../extension/tab-search.js';
+import '../extension/wait.js';
 import '../extension/core.js';
 import '../extension/policy.js';
 const { createService, SESSION_KEY, boundResponse, validate } = globalThis.FirefoxBridgeCore;

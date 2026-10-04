@@ -54,7 +54,7 @@ test('real SDK stdio exposes all tools, forwards calls and rejects invalid schem
   t.after(() => new Promise(resolve => server.close(resolve)));
   const client = await connect(t, server.address().port);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 25);
+  assert.equal(tools.length, 26);
   assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.ok(client.getInstructions().includes('untrusted'));
   assert.equal(tools.find(tool => tool.name === 'firefox_close_tabs').annotations.destructiveHint, true);
@@ -84,6 +84,11 @@ test('real SDK stdio exposes all tools, forwards calls and rejects invalid schem
   assert.equal(discarded.isError, true);
   assert.equal(discarded.structuredContent.error.code, 'TAB_DISCARDED');
   assert.equal(requests.length, 4);
+  const wait = { tabId: 4, url: 'https://example.com/', selector: 'main', imagesLoaded: true, fontsLoaded: true, timeoutMs: 30000 };
+  const waiting = await client.callTool({ name: 'firefox_wait_for', arguments: wait });
+  assert.deepEqual(waiting.structuredContent, { result: { method: 'wait_for', params: wait } });
+  assert.equal((await client.callTool({ name: 'firefox_wait_for', arguments: { tabId: 4, timeoutMs: 1000 } })).isError, true);
+  assert.equal(requests.length, 5);
 });
 
 test('tool discovery works offline and a call gives an actionable isError response', async t => {
@@ -93,7 +98,7 @@ test('tool discovery works offline and a call gives an actionable isError respon
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const client = await connect(t, port);
-  assert.equal((await client.listTools()).tools.length, 25);
+  assert.equal((await client.listTools()).tools.length, 26);
   const response = await client.callTool({ name: 'firefox_status', arguments: {} });
   assert.equal(response.isError, true);
   assert.equal(response.structuredContent.error.code, 'FIREFOX_OFFLINE');
@@ -112,7 +117,7 @@ test('stdio supports modern protocol discovery as well as legacy initialization'
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
   const client = await connect(t, server.address().port, 'auto');
-  assert.equal((await client.listTools()).tools.length, 25);
+  assert.equal((await client.listTools()).tools.length, 26);
   const response = await client.callTool({ name: 'firefox_status', arguments: {} });
   assert.deepEqual(response.structuredContent, { result: { connected: true } });
 });

@@ -4,6 +4,7 @@ import { PassThrough } from 'node:stream';
 import http from 'node:http';
 import { endianness } from 'node:os';
 import { createBridge } from '../server/native-host.mjs';
+import { createBridgeClient } from '../server/bridge-client.mjs';
 import { NativeDecoder, encodeNativeMessage, MAX_NATIVE_BYTES } from '../server/framing.mjs';
 
 const TOKEN = 'ab'.repeat(32);
@@ -169,4 +170,88 @@ test('a caller disconnected while streaming a body is never dispatched to Firefo
   request.destroy();
   await stopped;
   assert.equal(f.commands.filter(command => command.id).length, 0);
+});
+
+test('wait requests have bounded per-request native deadlines and successful waits are not cancelled', async t => {
+  const f = await fixture(t, { timeoutMs: 1 });
+  f.send({ type: 'ready' });
+  const originalSetTimeout = globalThis.setTimeout;
+  const scheduled = t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => originalSetTimeout(callback, delay, ...args));
+  f.listeners.push(command => {
+    if (command.method === 'wait_for') f.send({ id: command.id, result: { ready: true } });
+  });
+  for (const [params, budget] of [
+    [{}, 15_000], [{ timeoutMs: 1 }, 5_001], [{ timeoutMs: 120_000 }, 125_000],
+    ...[0, -1, 1.5, 120_001, Number.MAX_SAFE_INTEGER, '120000', null, true].map(timeoutMs => [{ timeoutMs }, 15_000]),
+  ]) {
+    const before = scheduled.mock.calls.length, started = Date.now();
+    const response = await f.request('/rpc', { method: 'wait_for', params: { tabId: 1, ...params } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.result, { ready: true });
+    const calls = scheduled.mock.calls.slice(before);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].arguments[1], budget, JSON.stringify(params));
+    const command = f.commands.at(-1);
+    assert.ok(command.expiresAt >= started + budget && command.expiresAt <= Date.now() + budget);
+  }
+  assert.deepEqual(f.commands.filter(command => command.type === 'cancel'), []);
+});
+
+test('native wait timeout cancels only its pending Firefox request and ignores a late reply', async t => {
+  const f = await fixture(t);
+  f.send({ type: 'ready' });
+  const originalSetTimeout = globalThis.setTimeout, timers = [];
+  t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+    const timer = originalSetTimeout(callback, delay, ...args);
+    timers.push({ callback, delay, timer });
+    return timer;
+  });
+  let received;
+  const dispatched = new Promise(resolve => { received = resolve; });
+  f.listeners.push(command => { if (command.method === 'wait_for') received(command); });
+  const result = f.request('/rpc', { method: 'wait_for', params: { tabId: 1, timeoutMs: 1 } });
+  const command = await dispatched;
+  assert.equal(timers.length, 1); assert.equal(timers[0].delay, 5_001);
+  // Trigger the real transport callback without spending five seconds in a test.
+  clearTimeout(timers[0].timer); timers[0].callback();
+  const response = await result;
+  assert.equal(response.status, 504); assert.equal(response.body.error.code, 'TIMEOUT');
+  assert.deepEqual(f.commands.filter(message => message.type === 'cancel'), [{ type: 'cancel', id: command.id }]);
+  f.send({ id: command.id, result: { ready: true } });
+  assert.equal((await f.request('/health', null)).body.result.connected, true);
+  assert.equal(f.commands.filter(message => message.method === 'wait_for').length, 1);
+});
+
+test('HTTP caller abort reaches Firefox as a wait-only cancellation and frees native pending slots', async t => {
+  const f = await fixture(t);
+  f.send({ type: 'ready' });
+  const client = createBridgeClient({ port: f.port, token: TOKEN });
+  let received, cancelled;
+  const dispatched = new Promise(resolve => { received = resolve; });
+  const cancellation = new Promise(resolve => { cancelled = resolve; });
+  f.listeners.push(command => {
+    if (command.method === 'wait_for') received(command);
+    if (command.type === 'cancel') cancelled(command);
+  });
+  const controller = new AbortController();
+  const waiting = client.call('wait_for', { tabId: 1, timeoutMs: 120_000 }, { signal: controller.signal });
+  const command = await dispatched;
+  controller.abort();
+  await assert.rejects(waiting, { code: 'CANCELLED' });
+  assert.deepEqual(await cancellation, { type: 'cancel', id: command.id });
+  f.send({ id: command.id, result: { ready: true } });
+  assert.equal((await f.request('/health', null)).body.result.connected, true);
+  assert.equal(f.commands.filter(message => message.type === 'cancel').length, 1);
+
+  let receivedMutation, closed;
+  const mutationDispatched = new Promise(resolve => { receivedMutation = resolve; });
+  const callerClosed = new Promise(resolve => { closed = resolve; });
+  f.listeners.push(message => { if (message.method === 'close_tabs') receivedMutation(message); });
+  f.bridge.server.once('request', (_request, response) => response.once('close', closed));
+  const otherController = new AbortController();
+  const mutation = client.call('close_tabs', { tabIds: [1] }, { signal: otherController.signal });
+  await mutationDispatched; otherController.abort();
+  await assert.rejects(mutation, { code: 'CANCELLED' });
+  await callerClosed;
+  assert.equal(f.commands.filter(message => message.type === 'cancel').length, 1);
 });

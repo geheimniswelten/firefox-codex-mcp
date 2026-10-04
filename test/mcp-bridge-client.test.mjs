@@ -104,3 +104,20 @@ test('exports have a longer timeout for approval, capture and the native PDF dia
   await assert.rejects(bridge.call('export_chunk', { transferId: 'one', index: 0 }), { code: 'BRIDGE_TIMEOUT' });
   assert.throws(() => createBridgeClient({ port, token }, { exportTimeoutMs: 600001 }), { code: 'INVALID_CONFIG' });
 });
+
+test('wait transport uses its bounded request budget independently of general timeouts', async t => {
+  const port = await listen(t, (_req, res) => res.end(JSON.stringify({ result: { ready: true } })));
+  const originalSetTimeout = globalThis.setTimeout;
+  const scheduled = t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => originalSetTimeout(callback, delay, ...args));
+  const bridge = createBridgeClient({ port, token }, { timeoutMs: 1, contentTimeoutMs: 1, exportTimeoutMs: 1 });
+  for (const [params, budget] of [
+    [{}, 20_000], [{ timeoutMs: 1 }, 10_001], [{ timeoutMs: 120_000 }, 130_000],
+    ...[0, -1, 1.5, 120_001, Number.MAX_SAFE_INTEGER, '120000', null, true].map(timeoutMs => [{ timeoutMs }, 20_000]),
+  ]) {
+    const before = scheduled.mock.calls.length;
+    assert.deepEqual(await bridge.call('wait_for', { tabId: 1, ...params }), { ready: true });
+    const calls = scheduled.mock.calls.slice(before);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].arguments[1], budget, JSON.stringify(params));
+  }
+});

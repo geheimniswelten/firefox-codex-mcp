@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
-const [backgroundSource, policySource] = await Promise.all([
+const [backgroundSource, policySource, waitSource] = await Promise.all([
   readFile(new URL('../extension/background.js', import.meta.url), 'utf8'),
   readFile(new URL('../extension/policy.js', import.meta.url), 'utf8'),
+  readFile(new URL('../extension/wait.js', import.meta.url), 'utf8'),
 ]);
 const settle = async () => { for (let index = 0; index < 5; index++) await new Promise(resolve => setImmediate(resolve)); };
 const clone = value => structuredClone(value);
@@ -23,8 +24,8 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
   let now = 10000, timerSequence = 0, requestSequence = 0, uuidSequence = 0, policy, reads = 0;
   const timers = new Map(), posted = [], calls = [], notifications = [];
   const normalWindow = { id: 7, type: 'normal', state: windowState, focused: false, tabs: [
-    { id: 42, windowId: 7, active: true, url: 'https://example.test/page', title: 'Example title' },
-    { id: 43, windowId: 7, active: false, url: 'https://background.test/page', title: 'Background title' },
+    { id: 42, windowId: 7, active: true, status: 'complete', url: 'https://example.test/page', title: 'Example title' },
+    { id: 43, windowId: 7, active: false, status: 'complete', url: 'https://background.test/page', title: 'Background title' },
     { id: 44, windowId: 7, active: false, url: 'https://background.test/page', title: 'Other background tab' },
   ] };
   const otherWindow = { id: 12, type: 'normal', focused: false, tabs: [{ id: 60, windowId: 12, active: true, url: 'https://other.test/' }] };
@@ -72,6 +73,7 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
         return clone(tab);
       },
       update: () => assert.fail('Approval must never activate or change a tab.'),
+      executeScript: async () => { reads++; return [{ conditions: { selector: false } }]; },
     },
   };
   // The real access policy performs before/after-approval scope checks. The
@@ -81,10 +83,12 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
     createService(_browser, options) {
       policy = options.contentAccess;
       return { ready: Promise.resolve(), async handle(method, params, context) {
-        assert.equal(method, 'read_content');
+        if (method === 'get_tabs') return { tabs: [await browser.tabs.get(params.tabIds[0])] };
+        if (method === 'wait_for') return realm.FirefoxBridgeWait.waitFor(browser, params, { ...context, contentAccess: policy });
+        assert.ok(['read_content', 'wait_for'].includes(method));
         context.assertLive();
         const tab = await browser.tabs.get(params.tabId), revision = policy.revision, authorization = {};
-        await policy.authorize(tab, authorization);
+        await policy.authorize(tab, authorization, { signal: context.signal });
         context.assertLive();
         await policy.assertAfterRead(tab.id, tab.url, revision, authorization);
         reads++;
@@ -93,14 +97,15 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
     },
   };
   class Clock extends Date { static now() { return now; } }
-  const context = vm.createContext({
-    browser, FirefoxBridgeCore: core, Date: Clock,
+  const realm = vm.createContext({
+    browser, FirefoxBridgeCore: core, Date: Clock, AbortController, URL,
     crypto: { randomUUID: () => `unique-approval-${++uuidSequence}` },
     setTimeout(callback, delay) { const id = ++timerSequence; timers.set(id, { callback, delay, expiresAt: now + delay }); return id; },
     clearTimeout: id => timers.delete(id), setInterval: () => 1,
   });
-  vm.runInContext(policySource, context);
-  vm.runInContext(backgroundSource, context);
+  vm.runInContext(policySource, realm);
+  vm.runInContext(waitSource, realm);
+  vm.runInContext(backgroundSource, realm);
   await settle();
   port.onMessage.emit({ type: 'connected' });
   const sender = { id: browser.runtime.id, url: browser.runtime.getURL('popup.html') };
@@ -110,9 +115,9 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
     reads: () => reads,
     message,
     status: () => message({ type: 'bridge_status' }),
-    async request(tabId = 42) {
+    async request(tabId = 42, method = 'read_content', extra = {}) {
       const id = `request-${++requestSequence}`;
-      port.onMessage.emit({ id, method: 'read_content', params: { tabId }, expiresAt: now + 130000 });
+      port.onMessage.emit({ id, method, params: { tabId, ...(method === 'wait_for' ? { selector: '#waiting' } : {}), ...extra }, expiresAt: now + 130000 });
       await settle();
       return id;
     },
@@ -426,4 +431,65 @@ test('concurrent content requests keep the first approval and reject the second'
   assert.deepEqual(await bridge.message({ type: 'approval_answer', id: first.id, allowed: true }), { ok: true });
   await settle();
   assert.equal(bridge.reads(), 1);
+});
+
+test('cancelling a wait dismisses its approval and cannot create a later session grant', async () => {
+  const bridge = await mount({ mode: 'ask-session' });
+  const id = await bridge.request(43, 'wait_for');
+  const pending = (await bridge.status()).pendingApproval;
+  assert.ok(pending);
+  bridge.port.onMessage.emit({ type: 'cancel', id: 'unrelated-request' });
+  await settle();
+  assert.equal((await bridge.status()).pendingApproval.id, pending.id);
+  bridge.port.onMessage.emit({ type: 'cancel', id });
+  await settle();
+  assert.equal((await bridge.status()).pendingApproval, null);
+  assert.equal(bridge.policy.promptPending, false);
+  assert.equal(bridge.policy.tabGrants.size, 0);
+  assert.equal(bridge.policy.expiresAt, null);
+  assert.equal(bridge.posted.find(message => message.id === id).error.code, 'CANCELLED');
+  assert.deepEqual(await bridge.message({ type: 'approval_answer', id: pending.id, allowed: true }), { ok: false });
+  assert.equal(bridge.reads(), 0);
+});
+
+test('a pending wait leaves metadata and tab-control requests outside its approval queue', async () => {
+  const bridge = await mount();
+  const id = await bridge.request(42, 'wait_for');
+  bridge.port.onMessage.emit({ id: 'metadata-while-waiting', method: 'get_tabs', params: { tabIds: [43] }, expiresAt: 140000 });
+  await settle();
+  assert.equal(bridge.posted.find(message => message.id === 'metadata-while-waiting').result.tabs[0].id, 43);
+  assert.equal(bridge.posted.some(message => message.id === id), false);
+  bridge.port.onMessage.emit({ type: 'cancel', id });
+  await settle();
+  assert.equal(bridge.reads(), 0);
+});
+
+test('disconnect aborts waiting content approvals without granting access', async () => {
+  const bridge = await mount({ mode: 'ask-session' });
+  await bridge.request(42, 'wait_for');
+  assert.ok((await bridge.status()).pendingApproval);
+  bridge.port.onDisconnect.emit();
+  await settle();
+  assert.equal((await bridge.status()).pendingApproval, null);
+  assert.equal(bridge.policy.promptPending, false);
+  assert.equal(bridge.policy.expiresAt, null);
+  assert.equal(bridge.reads(), 0);
+});
+
+test('the wait deadline includes real content approval and clears its prompt and pending policy state', async () => {
+  const bridge = await mount({ mode: 'ask-session' });
+  const id = await bridge.request(43, 'wait_for', { timeoutMs: 25 });
+  const pending = (await bridge.status()).pendingApproval;
+  assert.ok(pending);
+  await bridge.advance(25);
+  assert.equal(bridge.posted.find(message => message.id === id).error.code, 'WAIT_TIMEOUT');
+  assert.equal((await bridge.status()).pendingApproval, null);
+  assert.equal(bridge.policy.promptPending, false);
+  assert.equal(bridge.policy.tabGrants.size, 0);
+  assert.equal(bridge.policy.expiresAt, null);
+  assert.equal(bridge.reads(), 0);
+  assert.deepEqual(await bridge.message({ type: 'approval_answer', id: pending.id, allowed: true }), { ok: false });
+  await bridge.request();
+  assert.ok((await bridge.status()).pendingApproval);
+  await bridge.message({ type: 'approval_answer', id: (await bridge.status()).pendingApproval.id, allowed: false });
 });

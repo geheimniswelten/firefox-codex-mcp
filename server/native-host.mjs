@@ -4,8 +4,9 @@ import { pathToFileURL } from 'node:url';
 import { configPathFromArgs, loadConfig } from './config.mjs';
 import { encodeNativeMessage, NativeDecoder } from './framing.mjs';
 
-const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','save_png','save_html','save_pdf','export_chunk','export_release']);
+const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','wait_for','save_png','save_html','save_pdf','export_chunk','export_release']);
 const error = (code, message) => ({ error: { code, message } });
+const waitTimeoutMs = params => Number.isInteger(params.timeoutMs) && params.timeoutMs >= 1 && params.timeoutMs <= 120_000 ? params.timeoutMs : 10_000;
 
 function reply(response, status, body) {
   if (response.destroyed || response.writableEnded) return;
@@ -22,6 +23,10 @@ export function createBridge({ port, token, input = process.stdin, output = proc
   let listeningPort = port;
   const expectedAuth = Buffer.from(`Bearer ${token}`);
   const send = message => output.write(encodeNativeMessage(message));
+  const cancelWait = (id, method) => {
+    if (method !== 'wait_for' || closed || !ready) return;
+    try { send({ type: 'cancel', id }); } catch { /* Caller cleanup does not depend on native output. */ }
+  };
   const cancelAll = () => {
     for (const { timer, response } of pending.values()) {
       clearTimeout(timer);
@@ -89,15 +94,21 @@ export function createBridge({ port, token, input = process.stdin, output = proc
       if (response.destroyed || request.aborted) return;
       if (pending.size >= 64) { reply(response, 429, error('BUSY', 'Too many pending requests.')); return; }
       const id = randomUUID();
-      const requestTimeout = body.method === 'read_content' ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(body.method) ? exportTimeoutMs : timeoutMs;
+      const requestTimeout = body.method === 'wait_for' ? waitTimeoutMs(body.params) + 5_000 : body.method === 'read_content' ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(body.method) ? exportTimeoutMs : timeoutMs;
       const timer = setTimeout(() => {
+        const entry = pending.get(id);
+        if (!entry) return;
         pending.delete(id);
+        cancelWait(id, entry.method);
         reply(response, 504, error('TIMEOUT', 'Firefox did not respond in time. A mutation may already have run; inspect browser state before retrying.'));
       }, requestTimeout);
-      pending.set(id, { response, timer });
+      pending.set(id, { response, timer, method: body.method });
       response.on('close', () => {
         const entry = pending.get(id);
-        if (entry) { clearTimeout(entry.timer); pending.delete(id); }
+        if (entry) {
+          clearTimeout(entry.timer); pending.delete(id);
+          cancelWait(id, entry.method);
+        }
       });
       try { send({ id, method: body.method, params: body.params, expiresAt: Date.now() + requestTimeout }); }
       catch {

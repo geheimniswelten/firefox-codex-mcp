@@ -118,7 +118,7 @@ Diese Regeln betreffen das Lesen und Exportieren der Seite; das Auflisten von Ta
 
 ## Werkzeuge
 
-Alle 25 Werkzeugnamen haben das Präfix `firefox_`:
+Alle 26 Werkzeugnamen haben das Präfix `firefox_`:
 
 | Bereich | Namen ohne Präfix |
 | --- | --- |
@@ -128,6 +128,7 @@ Alle 25 Werkzeugnamen haben das Präfix `firefox_`:
 | Fenster | `create_window`, `update_window`, `close_window` |
 | Native Gruppen | `list_groups`, `group_tabs`, `ungroup_tabs`, `update_group`, `move_group` |
 | Seiteninhalt | `read_content` |
+| Auf Seitenzustand warten | `wait_for` |
 | Seitenexport | `save_png`, `save_html`, `save_pdf` |
 
 Beispiele für Codex: „Liste alle entladenen Firefox-Tabs“, „Finde Tabs mit localhost in der URL“, „Schalte diese drei Tabs stumm“, „Verschiebe die ausgewählten Tabs in ein neues Fenster“, „Fasse den Inhalt des aktiven Tabs zusammen“. IDs zunächst anhand der Übersicht oder einer gezielten Suche auflösen. `list_tabs` unterstützt Fenster, Aktivität, Audio, Stummschaltung, Entladezustand und Gruppe als Filter; Standard sind 100, maximal 500 Tabs pro Seite mit `offset`/`limit`.
@@ -158,6 +159,37 @@ Nach diesem Update das Add-on unter `about:debugging#/runtime/this-firefox` **ne
 Der optionale Browsertest `npm run test:firefox-tab-search` prüft die Suche mit echten Firefox-Tabs und Workern in einem eigenen Headless-Testprofil unter `work/`. Er benötigt Firefox und die Entwicklungsabhängigkeit `web-ext`; das normale Benutzerprofil wird nicht verwendet.
 
 `read_content` liefert Text oder HTML aus dem Hauptframe, optional für einen CSS-Selektor und mit Links. Standardlimit: 30.000 Zeichen; Maximum: 100.000. Kürzungen werden angezeigt. Schließen, Navigation, Neuladen und Entladen können ungespeicherte Seitendaten verlieren. Batch-Aktionen liefern Einzelergebnisse und können teilweise erfolgreich sein; nach einem Timeout oder Teilfehler zunächst Zustand prüfen, bevor erneut verändert wird. Parameterdetails stehen in `PROTOCOL.md` und den MCP-Werkzeugschemata.
+
+## Auf URL, Laden und Seitenelemente warten
+
+`firefox_wait_for` wartet gezielt auf einen Zustand im angegebenen Tab. Mindestens eine Bedingung muss gesetzt sein; boolesche Optionen mit `false` zählen nicht als Bedingung. Alle gewählten Bedingungen müssen gleichzeitig erfüllt sein.
+
+| Parameter | Bedeutung |
+| --- | --- |
+| `tabId` | ID des vorhandenen Tabs; erforderlich |
+| `url` | Exakter Vergleich der kanonisierten HTTP(S)- oder `about:blank`-URL |
+| `selector` | CSS-Selektor; mindestens ein passendes Element muss sichtbar sein |
+| `imagesLoaded` | Bei `true` müssen die `<img>`-Bilder mit aktueller Quelle vollständig und erfolgreich geladen sein |
+| `fontsLoaded` | Bei `true` müssen die aktuell angeforderten Schriften und die dazugehörige Layoutberechnung fertig sein |
+| `loadComplete` | Bei `true` muss Firefox den Tabstatus `complete` melden |
+| `timeoutMs` | Ganze Millisekunden von 1 bis 120000; Standard 10000, einschließlich einer eventuellen Inhaltsfreigabe |
+
+Für `url` und `loadComplete` allein werden nur Tab-Metadaten geprüft; dafür ist keine DOM-/Inhaltsfreigabe nötig. `selector`, `imagesLoaded` und `fontsLoaded` prüfen das Hauptdokument und verwenden die bestehenden Inhaltsregeln. Bei diesen Bedingungen wartet das Werkzeug zunächst auf Tabstatus `complete` und fragt anschließend gegebenenfalls nach Freigabe. Ein anderer Tab wird dafür nicht aktiviert; entladene Tabs werden nicht aufgeweckt.
+
+Ein Selektortreffer gilt bei vorhandener Layoutfläche und sichtbaren `visibility`-/`opacity`-Werten als sichtbar. Ein Element außerhalb des sichtbaren Bildausschnitts kann diese Bedingung erfüllen; eine Überdeckung durch andere Elemente wird nicht geprüft. Die Bildbedingung verlangt `complete` und `naturalWidth > 0`; kaputte Bilder verhindern den Erfolg. Lazy Loading wird nicht durch Scrollen ausgelöst. Die Schriftbedingung folgt `document.fonts.ready` für die aktuell angeforderten Schriften einschließlich Layout; ungenutzte Schriften im Zustand `unloaded` blockieren sie nicht.
+
+Zum Beispiel erst navigieren und anschließend auf die gerenderte Seite warten:
+
+```javascript
+firefox_update_tab({tabId: 123, url: "http://localhost:3000/"})
+firefox_wait_for({tabId: 123, url: "http://localhost:3000/", selector: "#app .ready", imagesLoaded: true, fontsLoaded: true, timeoutMs: 30000})
+```
+
+Sind die Bedingungen bereits erfüllt, liefert der Aufruf sofort Erfolg. Nach einer Navigation die erwartete URL mitgeben, damit die vorherige Seite die Prüfung nicht erfüllt. Ein separat gestarteter Wait kann einen noch nicht begonnenen Reload derselben URL vor dessen erstem Browserereignis nicht erkennen; ein Navigationstoken gehört nicht zu dieser API.
+
+Wird die Seite nach der Inhaltsfreigabe navigiert oder neu geladen, meldet das Werkzeug `PAGE_CHANGED`. Läuft die gesamte Wartefrist ab, meldet es `WAIT_TIMEOUT`. Ein MCP-Abbruch beendet die Warteschleife und eine zugehörige offene Freigabeabfrage. Nach einem Update das Add-on unter `about:debugging#/runtime/this-firefox` **neu laden** und die MCP-Verbindung im KI-Client **neu starten**, damit `firefox_wait_for` und sein Schema verfügbar sind.
+
+Der optionale Browsertest `npm run test:firefox-wait` prüft die Wartebedingungen in einem eigenen Headless-Firefox-Profil mit einer Testkopie der Erweiterung unter `work/`. Er benötigt Firefox, die Entwicklungsabhängigkeit `web-ext` und eine lokale TrueType-Schrift; unter Windows wird standardmäßig `C:\Windows\Fonts\arial.ttf` verwendet, alternativ der Pfad aus `FIREFOX_WAIT_FONT`. Die Testseite liefert Bild und Schrift über einen verzögerten lokalen HTTP-Server. Inhaltsfreigaben werden über einen Testadapter beantwortet; das Benutzerprofil, der Native Host und das echte Freigabepopup werden nicht verwendet.
 
 ## Seiten als PNG, einzelne HTML-Datei oder PDF speichern
 
