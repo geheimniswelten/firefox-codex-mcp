@@ -93,7 +93,9 @@ function render(state) {
   settings = state.settings;
   el("status").textContent = state.icon.label;
   el("dot").className = `dot ${state.icon.color}`;
-  el("detail").textContent = !settings.enabled ? "Der Native Host ist getrennt; Codex hat keinen Zugriff." : state.connected ? "Fenster- und Tabsteuerung ist verfügbar." : state.connecting ? "Verbindung zum Native Host wird aufgebaut …" : "Der lokale Native Host muss installiert sein.";
+  el("detail").textContent = !settings.enabled ? "Der Native Host ist getrennt; Codex hat keinen Zugriff." : state.connected && state.setup?.protocolVersion && state.setup.protocolVersion !== state.setup.requiredProtocol ? "Der Native Host ist verbunden, benötigt aber eine passende Protokollversion für den Zugriff." : state.connected ? "Fenster- und Tabsteuerung ist verfügbar." : state.connecting ? "Verbindung zum Native Host wird aufgebaut …" : "Die Verbindung zum lokalen Native Host ist derzeit nicht verfügbar.";
+  el("setupNotice").textContent = state.setup?.label || "Einrichtung und Registrierung prüfen.";
+  el("openSetup").textContent = state.setup?.actionLabel || "Einrichtung";
   el("lastAccess").textContent = state.lastAccessAt ? `Letzter MCP-Zugriff: ${new Date(state.lastAccessAt).toLocaleString("de-DE")}` : "Noch kein MCP-Zugriff.";
   el("toggle").textContent = settings.enabled ? "MCP deaktivieren" : "MCP aktivieren";
   el("reconnect").disabled = !settings.enabled;
@@ -137,6 +139,10 @@ el("toggle").addEventListener("click", () => save({ enabled: !settings.enabled }
 el("contentMode").addEventListener("change", event => save({ contentMode: event.target.value }));
 el("contentScope").addEventListener("change", event => save({ contentScope: event.target.value }));
 el("reconnect").addEventListener("click", () => request({ type: "bridge_reconnect" }));
+el("openSetup").addEventListener("click", async () => {
+  try { await browser.runtime.openOptionsPage(); }
+  catch (error) { el("error").hidden = false; el("error").textContent = String(error.message || error); }
+});
 el("resetApprovals").addEventListener("click", () => request({ type: "bridge_reset_approvals" }));
 el("inventoryPermission").addEventListener("click", changeInventoryPermission);
 el("approvalDeny").addEventListener("click", () => answerApproval(false));

@@ -5,8 +5,12 @@
   const { ContentAccess, normalizeSettings, iconStatus } = FirefoxBridgePolicy;
   const policy = new ContentAccess(browser, { requestApproval });
   const service = createService(browser, { contentAccess: policy });
+  const REQUIRED_REGISTRATION_REVISION = { win: 1, linux: 1, mac: 1 }, REQUIRED_PROTOCOL_VERSION = 1;
+  const CONFIRMATION_KEY = "bridgeSetupLastConfirmation";
   const state = { connected: false, connecting: false, lastError: null, lastAccessAt: null, version: VERSION };
-  let port = null, reconnectTimer = null, retryDelay = 1000, pendingCount = 0, prompt = null;
+  let port = null, reconnectTimer = null, handshakeTimer = null, retryDelay = 1000, pendingCount = 0, prompt = null;
+  let platform = null, setupMetadata = null, metadataError = null, lastConfirmation = null;
+  let confirmationWrites = Promise.resolve();
   let queue = Promise.resolve();
   const waits = new Map();
   const cancellation = (code, message) => Object.assign(new Error(message), { code });
@@ -14,15 +18,68 @@
     for (const controller of waits.values()) controller.abort(cancellation("MCP_DISABLED", "Die MCP-Verbindung wurde beendet."));
     waits.clear();
   }
+  const smallText = (value, limit = 80) => typeof value === "string" && value.length > 0 && value.length <= limit && !/[\u0000-\u001f]/u.test(value);
+  const isoTime = value => smallText(value, 64) && /T.*(?:Z|[+-]\d{2}:\d{2})$/u.test(value) && Number.isFinite(Date.parse(value));
+  function parseSetupMetadata(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value) || !smallText(value.hostVersion) || !Number.isSafeInteger(value.protocolVersion) || value.protocolVersion < 1) return null;
+    const registration = value.registration;
+    if (registration !== null && (!registration || typeof registration !== "object" || Array.isArray(registration) || !Number.isSafeInteger(registration.registrationRevision) || registration.registrationRevision < 0 || !smallText(registration.installerVersion) || !isoTime(registration.registeredAt) || !["win", "linux", "mac"].includes(registration.platform) || !smallText(registration.manifestPath, 4096))) return null;
+    return {
+      hostVersion: value.hostVersion, protocolVersion: value.protocolVersion,
+      registration: registration === null ? null : {
+        registrationRevision: registration.registrationRevision, installerVersion: registration.installerVersion,
+        registeredAt: registration.registeredAt, platform: registration.platform, manifestPath: registration.manifestPath,
+      },
+    };
+  }
+  function rememberConfirmation(metadata) {
+    if (!metadata.registration) return;
+    lastConfirmation = { ...metadata, registration: { ...metadata.registration }, verifiedAt: new Date().toISOString() };
+    const saved = lastConfirmation;
+    // Keep successive reconnect confirmations in order; storage is history only.
+    confirmationWrites = confirmationWrites.then(() => browser.storage.local.set({ [CONFIRMATION_KEY]: saved })).catch(() => {});
+  }
+  function setupState() {
+    const registration = setupMetadata?.registration;
+    const requiredRevision = REQUIRED_REGISTRATION_REVISION[platform || registration?.platform] ?? 1;
+    let status, label, description;
+    if (!policy.settings.enabled) {
+      status = "disabled"; label = "MCP deaktiviert"; description = "Aktiviere MCP im Erweiterungsmenü, um den Native Host und die Registrierung zu prüfen.";
+    } else if (state.connecting) {
+      status = "pending"; label = "Einrichtung wird geprüft …"; description = "Die Erweiterung wartet auf die Rückmeldung des lokalen Native Hosts.";
+    } else if (state.lastError || metadataError) {
+      status = /^No such native application de\.codex\.firefox_bridge\.?$/u.test(state.lastError) ? "host_missing" : "connection_error";
+      label = status === "host_missing" ? "Native Host nicht gefunden" : "Verbindung zum Native Host gestört";
+      description = status === "host_missing" ? "Firefox findet den Native Host nicht. Registrierung und Manifestpfad müssen geprüft werden." : "Die Registrierung kann derzeit nicht abschließend geprüft werden. Prüfe die Fehlermeldung und versuche die Verbindung erneut.";
+    } else if (setupMetadata && (setupMetadata.protocolVersion !== REQUIRED_PROTOCOL_VERSION || registration && (registration.registrationRevision < requiredRevision || platform && registration.platform !== platform))) {
+      status = "update_required"; label = "Aktualisierung erforderlich";
+      description = setupMetadata.protocolVersion !== REQUIRED_PROTOCOL_VERSION ? "Erweiterung und Native Host verwenden unterschiedliche Protokollversionen. Aktualisiere die zusammengehörigen Komponenten." : "Die bestätigte Registrierung passt noch nicht zu dieser Erweiterung. Speichere das aktuelle Registrierungsskript und führe es aus.";
+    } else if (state.connected && registration) {
+      status = "ready"; label = "Registrierung bestätigt"; description = "Der Native Host ist verbunden und bestätigt eine passende Registrierungsrevision.";
+    } else {
+      status = "unverified"; label = "Registrierung noch nicht bestätigt";
+      description = state.connected ? "Der Native Host ist verbunden, liefert aber keinen Registrierungsnachweis. Speichere das aktuelle Registrierungsskript, führe es aus und prüfe erneut." : "Ein Download bestätigt noch keine Installation. Führe das Registrierungsskript selbst aus und prüfe anschließend erneut.";
+    }
+    return {
+      status, label, description, requiredRevision, requiredProtocol: REQUIRED_PROTOCOL_VERSION,
+      actionLabel: status === "update_required" ? "Registrierung aktualisieren" : ["host_missing", "unverified"].includes(status) ? "Einrichten / registrieren" : "Einrichtung",
+      platform, hostVersion: setupMetadata?.hostVersion ?? null, protocolVersion: setupMetadata?.protocolVersion ?? null,
+      registration: registration ? { ...registration } : null,
+      lastConfirmation: lastConfirmation ? { ...lastConfirmation, registration: { ...lastConfirmation.registration } } : null,
+    };
+  }
+  function clearHandshakeTimer() { if (handshakeTimer) clearTimeout(handshakeTimer); handshakeTimer = null; }
   function publicState() {
     if (prompt && Date.now() >= prompt.expiresAt) finishPrompt(false, prompt);
-    return { ...state, settings: { ...policy.settings }, sessionExpiresAt: policy.settings.contentMode === "ask-session" ? policy.expiresAt : null, fiveDayExpiresAt: policy.settings.contentMode === "ask-five-days" ? policy.expiresAt : null, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
+    return { ...state, lastError: state.lastError || metadataError, setup: setupState(), settings: { ...policy.settings }, sessionExpiresAt: policy.settings.contentMode === "ask-session" ? policy.expiresAt : null, fiveDayExpiresAt: policy.settings.contentMode === "ask-five-days" ? policy.expiresAt : null, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
   }
   function badge() {
     const status = iconStatus({ ...state, enabled: policy.settings.enabled });
-    browser.browserAction.setBadgeText({ text: prompt ? "?" : "" }).catch(() => {});
+    const setup = setupState();
+    const setupBadge = setup.status === "update_required" ? "↑" : ["host_missing", "unverified", "connection_error"].includes(setup.status) ? "!" : "";
+    browser.browserAction.setBadgeText({ text: prompt ? "?" : setupBadge }).catch(() => {});
     browser.browserAction.setIcon({ path: `icon-${status.color}.svg` }).catch(() => {});
-    browser.browserAction.setTitle({ title: `Firefox ↔ Codex · ${prompt ? "Inhaltsfreigabe erforderlich · Erweiterung anklicken" : status.label}` }).catch(() => {});
+    browser.browserAction.setTitle({ title: `Firefox ↔ Codex · ${prompt ? "Inhaltsfreigabe erforderlich · Erweiterung anklicken" : setupBadge ? setup.label : status.label}` }).catch(() => {});
   }
   function notifyPopup() {
     try { browser.runtime.sendMessage({ type: "bridge_status_changed" }).catch(() => {}); }
@@ -71,6 +128,7 @@
     retryDelay = Math.min(retryDelay * 2, 30000);
   }
   function disconnect() {
+    clearHandshakeTimer(); setupMetadata = null; metadataError = null;
     abortWaits();
     service.clearExports?.();
     service.clearHistorySnapshots?.();
@@ -87,13 +145,22 @@
   function receive(target, message) {
     if (target !== port || !policy.settings.enabled || !message || typeof message !== "object") return;
     if (message.type === "connected") {
-      state.connected = true; state.connecting = false; state.lastError = null; retryDelay = 1000; badge(); return;
+      clearHandshakeTimer(); state.connected = true; state.connecting = false; state.lastError = null; retryDelay = 1000; badge(); return;
+    }
+    if (message.type === "setup_status") {
+      const metadata = parseSetupMetadata(message);
+      if (!metadata) { setupMetadata = null; metadataError = "Der Native Host lieferte einen ungültigen Registrierungsnachweis."; state.connecting = false; badge(); return; }
+      metadataError = null; setupMetadata = metadata; rememberConfirmation(metadata); badge(); return;
     }
     if (message.type === "cancel" && typeof message.id === "string") {
       waits.get(message.id)?.abort(cancellation("CANCELLED", "Die Anfrage wurde abgebrochen."));
       return;
     }
     if (typeof message.id !== "string" || message.id.length > 128 || typeof message.method !== "string" || message.method.length > 64) return;
+    if (metadataError) { send(target, { id: message.id, error: { code: "HOST_STATUS_INVALID", message: metadataError } }); return; }
+    if (setupMetadata && setupMetadata.protocolVersion !== REQUIRED_PROTOCOL_VERSION) {
+      send(target, { id: message.id, error: { code: "PROTOCOL_MISMATCH", message: "Erweiterung und Native Host verwenden unterschiedliche Protokollversionen." } }); return;
+    }
     try { validate(message.method, message.params ?? {}); }
     catch (error) { send(target, { id: message.id, error: errorData(error) }); return; }
     if (pendingCount >= 32) { send(target, { id: message.id, error: { code: "BUSY", message: "Zu viele ausstehende Firefox-Anfragen." } }); return; }
@@ -119,22 +186,33 @@
   }
   function connect() {
     if (!policy.settings.enabled || port) return;
-    state.connecting = true; state.lastError = null; badge();
+    setupMetadata = null; metadataError = null; state.connecting = true; state.lastError = null; badge();
     try {
       const current = browser.runtime.connectNative("de.codex.firefox_bridge"); port = current;
       current.onMessage.addListener(message => receive(current, message));
       current.onDisconnect.addListener(() => {
         if (port !== current) return;
-        port = null; abortWaits(); service.clearExports?.(); service.clearHistorySnapshots?.(); finishPrompt(false); state.connected = false; state.connecting = false;
+        port = null; clearHandshakeTimer(); setupMetadata = null; metadataError = null; abortWaits(); service.clearExports?.(); service.clearHistorySnapshots?.(); finishPrompt(false); state.connected = false; state.connecting = false;
         state.lastError = String(current.error?.message || "Native Host getrennt. Installation und Firefox-Profil prüfen.").slice(0, 1000);
         badge(); scheduleReconnect();
       });
+      handshakeTimer = setTimeout(() => {
+        if (port !== current || state.connected) return;
+        disconnect(); state.lastError = "Der Native Host hat den Verbindungsaufbau nicht rechtzeitig bestätigt."; badge(); scheduleReconnect();
+      }, 10000);
       current.postMessage({ type: "ready", version: VERSION });
-    } catch (error) { port = null; state.connecting = false; state.lastError = String(error.message || error).slice(0, 1000); badge(); scheduleReconnect(); }
+    } catch (error) {
+      const failedPort = port; port = null; clearHandshakeTimer();
+      try { failedPort?.disconnect(); } catch { /* Startup already failed. */ }
+      state.connecting = false; state.lastError = String(error.message || error).slice(0, 1000); badge(); scheduleReconnect();
+    }
   }
   browser.runtime.onMessage.addListener((message, sender) => {
     if (sender.id !== browser.runtime.id || !message || typeof message !== "object") return undefined;
-    if (sender.url !== browser.runtime.getURL("popup.html")) return undefined;
+    const fromPopup = sender.url === browser.runtime.getURL("popup.html");
+    const fromSetup = sender.url === browser.runtime.getURL("setup/setup.html");
+    if (!fromPopup && !fromSetup) return undefined;
+    if (fromSetup && !["bridge_status", "bridge_reconnect"].includes(message.type)) return undefined;
     if (message.type === "approval_answer") {
       const current = prompt;
       if (!current || !promptIsCurrent(current) || message.id !== current.id || typeof message.allowed !== "boolean") return Promise.resolve({ ok: false });
@@ -158,7 +236,14 @@
     return undefined;
   });
   const startup = (async () => {
-    const saved = await browser.storage.local.get("bridgeSettings");
+    const [saved, platformInfo] = await Promise.all([
+      browser.storage.local.get(["bridgeSettings", CONFIRMATION_KEY]),
+      Promise.resolve().then(() => browser.runtime.getPlatformInfo?.()).catch(() => null),
+    ]);
+    platform = ["win", "linux", "mac"].includes(platformInfo?.os) ? platformInfo.os : null;
+    const previous = saved[CONFIRMATION_KEY];
+    const previousMetadata = parseSetupMetadata(previous);
+    if (previousMetadata?.registration && isoTime(previous.verifiedAt)) lastConfirmation = { ...previousMetadata, verifiedAt: previous.verifiedAt };
     policy.setSettings(saved.bridgeSettings || {}, { persist: false });
     await policy.restoreApprovals();
     await service.ready;

@@ -1,0 +1,18 @@
+*local-install : Extension\manifest.json
+*upload : dist\firefox-codex-mcp-extension.zip
+
+package.json : version
+package-lock.json : version
+package-lock.json : packages\version
+node_modules\.package-lock.json : version
+
+PROTOCOL.md : {type:"ready",version:"*"}
+
+extension\core.js : VERSION
+extension\manifest.json : version
+extension\popup.html : id=version
+
+server\mcp.mjs : createFirefoxServer->version
+server\native-host.mjs : /health
+
+work\... : {ignored}

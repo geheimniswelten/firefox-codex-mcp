@@ -1,6 +1,6 @@
 ﻿{
   "manifest_version": 2,
-  "name": "Firefox ↔ Codex MCP",
+  "name": "Codex MCP for Firefox",
   "version": "1.0.2",
   "description": "Lokale MCP-Verbindung für Tabs, Fenster, Tabgruppen, Chronik, Lesezeichen, Seiteninhalte und Export.",
   "browser_specific_settings": {
@@ -20,6 +20,7 @@
     "default_popup": "popup.html",
     "default_icon": "icon.svg"
   },
+  "options_ui": {"page": "setup/setup.html", "open_in_tab": true, "browser_style": false},
   "icons": {"48": "icon.svg", "96": "icon.svg"},
   "content_security_policy": "script-src 'self'; object-src 'none'"
 }

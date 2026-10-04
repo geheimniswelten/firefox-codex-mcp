@@ -34,6 +34,7 @@ function mount({ granted = false, rejection = null, accepted = true, pendingAppr
   const browser = {
     runtime: {
       onMessage: event(),
+      async openOptionsPage() { calls.push(['openOptionsPage']); },
       async sendMessage(message) {
         messages.push(structuredClone(message));
         if (message.type === 'approval_answer') {
@@ -73,6 +74,7 @@ function mount({ granted = false, rejection = null, accepted = true, pendingAppr
     queueStatus(response) { statusResponses.push(response); },
     setAnswerHandler(handler) { answerHandler = handler; },
     statusChanged() { browser.runtime.onMessage.emit({ type: 'bridge_status_changed' }); },
+    openSetup() { return el('openSetup').listeners.get('click')(); },
     changeSetting(id, value) {
       const control = el(id);
       if (control.disabled) return undefined;
@@ -98,6 +100,21 @@ function mount({ granted = false, rejection = null, accepted = true, pendingAppr
     }
   };
 }
+
+test('setup action opens the declared options page without granting access or starting an installer', async () => {
+  const popup = mount();
+  await settle();
+  popup.state.setup = { label: 'Aktualisierung erforderlich', actionLabel: 'Registrierung aktualisieren' };
+  popup.statusChanged();
+  await settle();
+  assert.equal(popup.el('setupNotice').textContent, 'Aktualisierung erforderlich');
+  assert.equal(popup.el('openSetup').textContent, 'Registrierung aktualisieren');
+  const messagesBefore = popup.messages.length;
+  await popup.openSetup();
+  assert.deepEqual(popup.calls, [['openOptionsPage']]);
+  assert.equal(popup.messages.length, messagesBefore);
+  assert.match(html, /id="openSetup"/u);
+});
 
 test('inventory consent defaults off and requests only data collection directly from a user click', async () => {
   const popup = mount(); await settle();

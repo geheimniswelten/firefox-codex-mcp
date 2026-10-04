@@ -5,14 +5,24 @@ Upstream: https://github.com/gildas-lormeau/single-file-core/tree/v1.6.19
 Package: https://registry.npmjs.org/single-file-core/-/single-file-core-1.6.19.tgz
 Package integrity: sha512-eWcAxr9rD1jaTPLrVxAgZdKXIZ65k/oz+tSn5Y5x3S946ijoIC7Qn1L2qE5y7p5BtLKvQCb4bqQXnee9CWYrTA==
 
-The complete corresponding JavaScript source used to build single-file.bundle.js
-is included, unmodified, in single-file-core/. Its LICENSE is included there.
-Third-party notices and licenses are retained in those sources and the bundle.
-The bundle is a generated transformation; it is not an unmodified upstream file.
+The complete, unmodified upstream JavaScript source used as build input is
+included in vendor/single-file-core/ in the Firefox MCP source package, outside
+the add-on runtime. Its LICENSE and original third-party notices are retained
+there. The full upstream license is also included in the add-on as
+extension/vendor/single-file-LICENSE.txt, alongside this notice and the bundle.
+
+The bundle is generated from those originals and the reviewable transformations
+in scripts/single-file-build.mjs; it is not an unmodified upstream file. The build
+removes unsupported compression/ZIP workers, infobar, noscript restoration and
+Chromium-specific DOM code. Unsupported upstream options fail closed, and
+loadOptionsFromPage is disabled so a page cannot override fixed export options.
+The supported HTML capture features remain included. Notices for included code
+are retained in the bundle. Original source files are not modified by the build.
 After npm ci, reproduce it with: node scripts/build-html-vendor.mjs
 The build uses the exact esbuild version pinned in package-lock.json.
 
 The extension's SingleFile integration, including html-export.js, is distributed
-under AGPL-3.0-or-later. Its corresponding source is included in the extension
-and in the Firefox MCP source package. SingleFile has no runtime download or
-remote service dependency in this integration.
+under AGPL-3.0-or-later. Its corresponding source, original vendor sources and
+reproducible build instructions are included in the Firefox MCP source package.
+SingleFile has no runtime download or remote service dependency in this
+integration.

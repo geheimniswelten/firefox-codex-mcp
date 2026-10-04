@@ -130,7 +130,15 @@
       browser.tabs.onRemoved.addListener(onRemoved);
       options.signal?.addEventListener("abort", onAbort, { once: true });
       if (options.signal?.aborted) onAbort();
-      timer = setTimeout(() => stop(timeoutError()), p.timeoutMs);
+      const onTimeout = () => {
+        if (stopped || done) return;
+        // Timers can fire before the wall-clock deadline by a millisecond.
+        // Keep pending approval/probe promises alive until the actual deadline.
+        const remaining = deadline - Date.now();
+        if (remaining > 0) { timer = setTimeout(onTimeout, remaining); return; }
+        stop(timeoutError());
+      };
+      timer = setTimeout(onTimeout, Math.max(1, deadline - Date.now()));
       while (true) {
         const beforeGet = generation;
         let tab = await call(() => browser.tabs.get(p.tabId));

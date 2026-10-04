@@ -1,7 +1,10 @@
+__history/
+__recovery/
+__pycache__/
+coverage/
+dist/
 node_modules/
+work/
 .runtime/
 .local/
-dist/
 *.log
-coverage/
-work/

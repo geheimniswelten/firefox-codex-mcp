@@ -117,6 +117,9 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
   vm.runInContext(waitSource, realm);
   vm.runInContext(backgroundSource, realm);
   await settle();
+  port.onMessage.emit({ type: 'setup_status', hostVersion: '1.0.2', protocolVersion: 1, registration: {
+    registrationRevision: 1, installerVersion: '1.0.2', registeredAt: '2026-10-01T12:00:00.000Z', platform: 'win', manifestPath: 'C:\\example\\de.codex.firefox_bridge.json',
+  } });
   port.onMessage.emit({ type: 'connected' });
   const sender = { id: browser.runtime.id, url: browser.runtime.getURL('popup.html') };
   const message = async (value, from = sender) => clone(await browser.runtime.onMessage.emit(value, from)[0]);
@@ -410,7 +413,7 @@ test('disconnect and changed access policy cancel pending approval immediately',
     }
     assert.equal((await bridge.status()).pendingApproval, null);
     assert.deepEqual(await bridge.message({ type: 'approval_answer', id: pending.id, allowed: true }), { ok: false });
-    assert.equal(bridge.calls.filter(call => call[0] === 'badge').at(-1)[1].text, '');
+    assert.equal(bridge.calls.filter(call => call[0] === 'badge').at(-1)[1].text, reason === 'disconnect' ? '!' : '');
     storage?.resolve();
     await settle();
     assert.equal(bridge.reads(), 0);

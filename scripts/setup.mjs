@@ -3,11 +3,10 @@ import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { HOST_NAME, EXTENSION_ID, REGISTRATION_REVISION, INSTALLER_VERSION, registerNativeHost, unregisterNativeHost, writeRegistrationStatus, removeRegistrationStatus } from './registration.mjs';
 
-export const HOST_NAME = 'de.codex.firefox_bridge';
-export const EXTENSION_ID = 'firefox-codex-mcp@local.invalid';
+export { HOST_NAME, EXTENSION_ID };
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const registryPath = `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${HOST_NAME}`;
 
 function run(command, args, options = {}) {
   if (command === 'powershell.exe') {
@@ -90,21 +89,7 @@ export function assertRegistrationCompatible(existingPath, manifestPath, platfor
   }
 }
 
-function registerNative(manifestPath) {
-  if (process.platform !== 'win32') {
-    throw new Error('--register-native ist hier nur für Windows implementiert. Anleitung für andere Systeme: README.md.');
-  }
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    `$target = 'Registry::HKEY_CURRENT_USER\\Software\\Mozilla\\NativeMessagingHosts\\${HOST_NAME}'`,
-    'if (Test-Path -LiteralPath $target) { @{ exists = $true; value = (Get-Item -LiteralPath $target).GetValue("") } | ConvertTo-Json -Compress } else { @{ exists = $false } | ConvertTo-Json -Compress }',
-  ].join('\n');
-  const current = JSON.parse(run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script]));
-  assertRegistrationCompatible(current.exists ? current.value : undefined, manifestPath);
-  if (!current.exists) run('reg.exe', ['add', registryPath, '/ve', '/t', 'REG_SZ', '/d', manifestPath, '/f']);
-}
-
-export async function prepareSetup({ root = defaultRoot, nodePath = process.execPath, port, register = false } = {}) {
+export async function prepareSetup({ root = defaultRoot, nodePath = process.execPath, port, register = false, platform = process.platform, home, registryAdapter, now = Date.now } = {}) {
   root = resolve(root);
   if (!isAbsolute(nodePath)) throw new Error('Node-Pfad muss absolut sein.');
   if (port !== undefined && (!Number.isInteger(port) || port < 1024 || port > 65535)) {
@@ -160,25 +145,51 @@ export async function prepareSetup({ root = defaultRoot, nodePath = process.exec
     'tool_timeout_sec = 180',
     '',
   ].join('\n'));
-  if (register) registerNative(manifestPath);
-  return { local, configPath, manifestPath, launcherPath, codexPath, port: config.port, registered: register };
+  let registration = null, registrationStatus = null;
+  if (register) {
+    registration = await registerNativeHost({ manifestPath, platform, home, registryAdapter });
+    registrationStatus = await writeRegistrationStatus(configPath, { schemaVersion: 1, registrationRevision: REGISTRATION_REVISION, installerVersion: INSTALLER_VERSION, registeredAt: new Date(now()).toISOString(), platform: registration.platform, manifestPath, registrationPath: registration.registrationPath });
+  }
+  return { local, configPath, manifestPath, launcherPath, codexPath, port: config.port, registered: register, registrationPath: registration?.registrationPath ?? null, registrationStatus };
 }
 
-async function main() {
+export async function unregisterSetup({ root = defaultRoot, platform = process.platform, home, registryAdapter, dryRun = false } = {}) {
+  root = resolve(root);
+  const local = join(root, '.local'), configPath = join(local, 'config.json'), manifestPath = join(local, `${HOST_NAME}.json`);
+  const result = await unregisterNativeHost({ manifestPath, platform, home, registryAdapter, dryRun });
+  const statusRemoved = await removeRegistrationStatus(configPath, { ...result, dryRun });
+  return { ...result, local, configPath, statusRemoved };
+}
+
+export async function main(args = process.argv.slice(2)) {
   const options = {};
-  const args = process.argv.slice(2);
+  let unregister = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--register-native') options.register = true;
+    else if (arg === '--unregister-native') unregister = true;
+    else if (arg === '--dry-run') options.dryRun = true;
+    else if (arg === '--root') {
+      const value = args[++index];
+      if (!value || !isAbsolute(value)) throw new Error('--root erwartet einen absoluten Projektpfad.');
+      options.root = value;
+    }
     else if (arg === '--port') {
       const raw = args[++index];
       if (!raw || !/^\d+$/u.test(raw)) throw new Error('--port erwartet eine Portnummer.');
       options.port = Number(raw);
     } else if (arg === '--help') {
-      console.log('node scripts/setup.mjs [--port 38477] [--register-native]\nOhne --register-native werden ausschließlich Projektdateien erzeugt.');
+      console.log('node scripts/setup.mjs [--root ABSOLUTER_PFAD] [--port 38477] [--register-native]\nnode scripts/setup.mjs [--root ABSOLUTER_PFAD] --unregister-native [--dry-run]\nOhne --register-native werden ausschließlich Projektdateien erzeugt.');
       return;
     } else throw new Error(`Unbekannte Option: ${arg}`);
   }
+  if (unregister) {
+    if (options.register || options.port !== undefined) throw new Error('--unregister-native darf nicht mit Registrierung oder --port kombiniert werden.');
+    const result = await unregisterSetup(options);
+    console.log(`${result.dryRun ? 'Vorschau: ' : ''}Native-Host-Registrierung ${result.changed ? result.dryRun ? 'würde entfernt' : 'entfernt' : 'nicht vorhanden'}.\nRegistrierungspfad: ${result.registrationPath}\nProjektdateien und KI-Client-Konfigurationen bleiben erhalten.`);
+    return result;
+  }
+  if (options.dryRun) throw new Error('--dry-run ist nur mit --unregister-native möglich.');
   const result = await prepareSetup(options);
   console.log(`Lokale Konfiguration: ${result.configPath}\nCodex-Konfigurationsvorlage: ${result.codexPath}\nNative-Host-Manifest: ${result.manifestPath}\nPort: ${result.port}\nNative Host registriert: ${result.registered ? 'ja' : 'nein'}\nFirefox-Erweiterung danach laden bzw. neu laden. KI-Clients: scripts/configure-clients.mjs (wird von install.ps1 automatisch ausgefuehrt).`);
 }

@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.2",
+  "registrationRevision": 1,
+  "archiveSha256": "4c6742d6b92e01674f06abea1e09fedba5cc7de609a27e7583ec7010269abd8b",
+  "files": [
+    {
+      "path": "LICENSE.md",
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+    },
+    {
+      "path": "PROTOCOL.md",
+      "sha256": "9edbebd299fc9c787f6061d8fcbc3a692a9a593b49a19d4e28a266ba7f926a44"
+    },
+    {
+      "path": "README.md",
+      "sha256": "772eabe605b14c3186516addf46c1a9d7893c898a1ce6ebef11a62bc47654d28"
+    },
+    {
+      "path": "install.ps1",
+      "sha256": "4d48fd606e911536765d1bbd93d58eb73d529f24d5b35860c168734f26abd46b"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "f568bc85a446e747ea5a188e861aee2c322d4c6bc64aa68efa18e0cb074596b3"
+    },
+    {
+      "path": "package.json",
+      "sha256": "de8544261595d91d8fd3849c219a72254084e25d1764a7a52aebafef3f480fa3"
+    },
+    {
+      "path": "scripts/client-config.mjs",
+      "sha256": "634da50ddd9cfee137c7d0b97968dd7e74ebfc1d6af67c3e0d75b425a7f25d85"
+    },
+    {
+      "path": "scripts/companion-payload.mjs",
+      "sha256": "224e8d707839f584ff5c1bb31aab6b56c5bfa9ca9a521e90d0feb459b5475b5d"
+    },
+    {
+      "path": "scripts/configure-clients.mjs",
+      "sha256": "56bdfab924414e6fad1023ed2efc3863de09209c42c23392a54f532aa8fe13d0"
+    },
+    {
+      "path": "scripts/install-companion.mjs",
+      "sha256": "32a3fbf9326256ab3ffcbab1231b16492079a74553b4e8e1be2bd461b035d7dc"
+    },
+    {
+      "path": "scripts/node-runtime.ps1",
+      "sha256": "ad6bf371b3ae415db937bbaacd22df1e73e0c03486d8c61f5e9279c409713252"
+    },
+    {
+      "path": "scripts/open-firefox-setup.ps1",
+      "sha256": "4bfecc6df142d7885b8124414f5ef7b18f9548825a9e348bf6d8b4cecb8205f7"
+    },
+    {
+      "path": "scripts/registration.mjs",
+      "sha256": "459fa1ef1b2b737ae9917a944a4ce7840818a40b3b43f4f4d4145b50320c17ba"
+    },
+    {
+      "path": "scripts/setup.mjs",
+      "sha256": "66b9983a3f81e550de4c9a6b67e1d5716b15a75b674be4320ed5a0e4a23b32c8"
+    },
+    {
+      "path": "server/bridge-client.mjs",
+      "sha256": "bd58e91f16fe50044e1c82eeabff338d816073d3a2c01a827203c98f5fb4cdd9"
+    },
+    {
+      "path": "server/config.mjs",
+      "sha256": "fb6e4024dfab7e813fba516a717fa0dabb481845b927261d8505d10d1b20e9f0"
+    },
+    {
+      "path": "server/exports.mjs",
+      "sha256": "527b1b782aa1ad8225b45bf306142ade384b9bbb6f564d2403425fc9f57540be"
+    },
+    {
+      "path": "server/framing.mjs",
+      "sha256": "f3ee0030dbffe95d79d13d5226d6fb041c06d4818f6db455f8de4843da933db1"
+    },
+    {
+      "path": "server/mcp.mjs",
+      "sha256": "ab7890d6091721c408078f60a5d8789ebae0994d9a609ef886fc1ba14a011944"
+    },
+    {
+      "path": "server/native-host.mjs",
+      "sha256": "9fa2ae0dc6a2e0b3f299bf3a20367243240334e88279f89760f0800cd67aad1f"
+    },
+    {
+      "path": "server/tools.mjs",
+      "sha256": "d9fcf0cca6697ba8a48f37dfe46ba04db97e8bf5bf1f9259ad9c48ffb5e7ca27"
+    }
+  ]
+}

@@ -3,11 +3,11 @@
 - Firefox mit KI verwalten: Tabs/Fenster/Plugins suchen/durchsuchen/schließen/verschieben/...
    - Chronik nach Titel, URL und Zeitraum durchsuchen; Lesezeichen und Ordner einschließlich Symbolleiste suchen, anlegen, bearbeiten, verschieben und löschen
    - Codex, Claude Code (CLI / VS Code), Claude Desktop, Eigent, Gemini CLI / Code Assist, Gemini Desktop, Hermes, LM Studio and OpenClaw
-- **ACHTUNG:** derzeit im Testmodus, nur als temporäres Add-on
-- Downloaden und install.cmd ausführen
+- Die Erweiterung ist derzeit **unsigniert**. Einrichtung im Add-on und Pakete für eine spätere AMO-Einreichung sind vorbereitet; eine signierte XPI oder Veröffentlichung wurde noch nicht erstellt.
+- Für den bisherigen Entwicklungsweg downloaden und install.cmd ausführen
    - in about:debugging#/runtime/this-firefox "Temporäres Add-on laden" -> ...\firefox-codex-mcp\extension\manifest.json
-   - als FF-Plugin, online, zum direkt Installieren, aktuell noch nicht (aus Firefox heraus ist eine Registrierung bei den KI-Agenten sowieso nicht möglich)
-- Windows + Firefox _(FF im OSX und Linux prinzipiell möglich, also Plugin inkl. MCP-Server, aber erstellen und registrieren aktuell manuell)_
+   - alternativ im geladenen Add-on die Einrichtungsseite öffnen, das passende Registrierungsskript herunterladen und außerhalb von Firefox ausführen
+- Desktop-Firefox unter Windows, Linux und macOS; ein lokaler Native-Messaging-Helfer ist erforderlich
 - Zugriff auf Seiteninhalte standardmäßig gesperrt (bei Erstzugriff wird nach Freigabe gefragt)
 - Export von Webseiten als PNG und Single-HTML (auch als PDF -> öffnet aber nur den Speichern-Dialog des FF)
 
@@ -23,14 +23,48 @@ Der optionale Skill `skills/firefox-browser/SKILL.md` bevorzugt Firefox auch bei
 
 Bei Suchtreffern zu offenen Tabs nennt der Skill Titel und Tab-ID; URLs erscheinen bei Bedarf als nicht anklickbarer Code. Ein Folgeauftrag wie „Zeige Tab 123 in Firefox“ aktiviert den bestehenden Tab und holt sein Fenster nach vorne. Anklickbare Folgeaktionen setzen eine tatsächlich unterstützende Client-Oberfläche voraus; eine Skill-Änderung allein macht Webseiten-Links nicht zu MCP-Aufrufen.
 
-- Desktop-Firefox **140 oder neuer** für native Tabgruppen und die aktuelle Firefox-Datenfreigabe bei der Installation.
-- **Node.js 22 oder neuer** einschließlich npm. Der Windows-Installer verwendet eine passende vorhandene Installation oder richtet automatisch Node 24 LTS samt npm unter `.runtime/node` im Projekt ein. Eine vorherige systemweite Node-Installation ist damit nicht erforderlich.
+- Desktop-Firefox **140 oder neuer** für native Tabgruppen und die aktuelle Firefox-Datenfreigabe bei der Installation. Firefox für Android wird nicht unterstützt.
+- **Node.js 22 oder neuer** einschließlich npm. Die Windows-Einrichtung verwendet eine passende vorhandene Installation oder richtet automatisch Node 24 LTS samt npm unter `.runtime/node` im gewählten Installationsordner ein. Unter Linux und macOS müssen Node und npm bereits vorhanden sein.
 - Ein KI-Client mit Unterstützung für lokale MCP-Server, beispielsweise Codex oder Claude Code.
 - Windows: PowerShell; Einrichtung erfolgt im eigenen Benutzerkonto ohne Administratorrechte.
 
 Die Dateien sind Quellcode und eine unsignierte Entwicklungs-Erweiterung. Sie sind durch das Erstellen dieses Projekts noch nicht in Firefox oder Codex installiert.
 
-## Windows: Installation
+## Einrichtung über das Add-on
+
+Die Einrichtungsseite `extension/setup/setup.html` öffnet sich als Add-on-Optionsseite in einem eigenen Firefox-Tab. Sie bietet Registrierung und Deregistrierung für Windows, Linux und macOS sowie den Verbindungs- und Registrierungsstatus des lokalen Helfers. Alle Texte sind auswählbar. Zwei schreibgeschützte Befehlsfelder für Registrierung und Deregistrierung bieten Kopierbuttons mit den passenden Aufrufen für Windows PowerShell beziehungsweise Linux/macOS mit `sh`. Falls das Kopieren nicht gelingt, lässt sich der Befehl im Feld manuell auswählen und kopieren; zusätzliche Berechtigungen sind dafür nicht nötig. Firefox lädt das gewählte Skript herunter; anschließend führt der Nutzer es außerhalb des Browsers aus. Das Add-on selbst schreibt keine Betriebssystemregistrierung und startet kein Installationsskript.
+
+Die Registrierungsdateien enthalten einen vollständigen, komprimierten Server-Quellpayload mit Installationslogik und `package-lock.json`. Ein zusätzlich heruntergeladener Projektordner ist dafür nicht erforderlich. Node-Runtime und npm-Abhängigkeiten sind nicht eingebettet: Windows kann die passende Runtime nachladen, die Einrichtung installiert die festgelegten Laufzeitpakete mit npm. Für diese Downloads wird eine Internetverbindung benötigt.
+
+1. Die Einrichtungsseite im Add-on öffnen und das Skript für das eigene Betriebssystem speichern.
+2. Den angezeigten Registrierungsbefehl kopieren und im Ordner der gespeicherten Skripte ausführen: `register.ps1` unter Windows in PowerShell beziehungsweise `register.sh` unter Linux/macOS mit `sh`. Der angezeigte Installationsordner kann übernommen oder durch einen absoluten Pfad ersetzt werden. Eine vorhandene Native-Host-Installation wird angeboten; die Wiederverwendung wird ausdrücklich bestätigt.
+3. Die Ergebnisliste für Native Host und erkannte KI-Clients prüfen. Fremde Registrierungen und geänderte MCP-Einträge werden als Konflikt behandelt. Die neue Standardinstallation liegt im Benutzerkonto, unabhängig von einem Entwicklungs-Repository:
+
+   | Betriebssystem | Standardordner |
+   | --- | --- |
+   | Windows | `%LOCALAPPDATA%\FirefoxCodexMCP` |
+   | Linux | `~/.local/share/firefox-codex-mcp` |
+   | macOS | `~/Library/Application Support/FirefoxCodexMCP` |
+
+4. In Firefox den Verbindungs-/Registrierungsstatus erneut prüfen und die MCP-Verbindung im KI-Client neu starten. Dann `firefox_status` und `firefox_get_current` aufrufen.
+
+Für einen ausdrücklich gewählten Installationsordner und optional einen anderen Port:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\register.ps1 -ProjectRoot "C:\Tools\FirefoxCodexMCP" -Port 38478
+```
+
+```sh
+sh ./register.sh --root "$HOME/.local/share/firefox-codex-mcp" --port 38478
+```
+
+Windows unterstützt außerdem `-NoDownload` und `-NoRegisterClients`; Linux/macOS `--no-register-clients`. `-NoDownload` setzt ein passendes vorhandenes Node samt npm voraus. Die Windows-Registrierung nutzt den bestehenden Installer mit `-NoOpenFirefox`; unter Unix übernimmt `scripts/install-companion.mjs` die Einrichtung. Ein bestehendes Repository wird nur dann als Installationsziel verwendet, wenn dieser Pfad ausdrücklich gewählt wird.
+
+Die Einrichtungsseite zeigt die vom Helfer gemeldete Serverversion, benötigte und aktuelle Registrierungsrevision, ausgeführte Skriptversion, Zeitpunkt und Manifestpfad. Die Registrierungsrevision wird unabhängig von der Add-on-Version gezählt. „Registrierung bestätigt“ setzt eine aktuelle Verbindung mit passendem Registrierungsnachweis voraus; bei abweichendem Protokoll, zu alter Revision oder falscher Plattform erscheint „Aktualisierung erforderlich“. Eine gespeicherte letzte Bestätigung ist nur ein früherer Prüfstand. Fehlender Native Host, Verbindungsfehler und eine noch unbestätigte Registrierung werden unterschieden. Nach Ausführen eines Skripts **„Erneut prüfen“** anklicken. Eine vorhandene Registrierung allein beweist keine laufende MCP-Client-Verbindung.
+
+Für eine spätere dauerhafte Installation in regulärem Firefox ist eine von Mozilla signierte XPI erforderlich. AMO kann öffentlich gelistete und nicht gelistete Erweiterungen signieren; die lokale Vorbereitung erzeugt weiterhin unsignierte Pakete. Der vorbereitete Einreichungs- und Reviewer-Leitfaden steht in [docs/AMO-submission.md](docs/AMO-submission.md). [Mozilla: Signierung und Verteilung](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
+
+## Windows: temporäre Entwicklung und bisherige Installation
 
 1. Den Projektordner an einen dauerhaften Ort entpacken. Die Einrichtung speichert absolute Pfade; bei späterem Verschieben muss sie erneut ausgeführt werden.
 2. `install.cmd` doppelklicken oder im Projektordner ausführen:
@@ -278,7 +312,7 @@ firefox_save_pdf({tabId: 123})
 
 **PNG:** Standardmäßig wird die gesamte Seite von oben bis unten in der aktuellen Breite des Tabs aufgenommen. `fullPage:false` nimmt nur den sichtbaren Ausschnitt auf. Die Aufnahme verwendet einen Bildpixel je CSS-Pixel. `loadDeferred:true` ist Standard: Ein Scroll-Durchlauf von höchstens 20 Sekunden beziehungsweise 150 Schritten versucht zuerst, nachgeladene Inhalte zu laden, und stellt anschließend die vorherige Scrollposition wieder her. Die Seite kann dabei eigene Nachladeaktionen ausführen. Mit `loadDeferred:false` wird dieser Durchlauf ausgelassen. `maxHeight` begrenzt die Aufnahme auf standardmäßig **30.000 CSS-Pixel**; bis **100.000** sind ausdrücklich einstellbar. Zusätzlich gelten technische Bildgrenzen von **32.760 Pixeln je Kante** und **100 Millionen Bildpunkten**. Bei Überschreitung meldet das Werkzeug einen Fehler. Endlos nachladende Seiten, virtuelle Listen und eigene Scrollbereiche können nicht vollständig garantiert werden; die Antwort meldet entsprechende Einschränkungen unter `warnings`.
 
-**Eine HTML-Datei:** Die Erweiterung enthält eine fest mitgelieferte Version von **SingleFile Core 1.6.19** einschließlich Quellcode und Lizenz; zur Aufnahme wird kein externer Speicherdienst aufgerufen. Gespeichert wird der aktuelle, bereits durch JavaScript aufgebaute DOM-Zustand; unterstützte CSS-, Bild- und Schriftressourcen werden in die Datei eingebettet. Zugängliche Canvas-Inhalte, Shadow DOM und Frames werden soweit möglich übernommen. JavaScript, Ereignishandler und `javascript:`-URLs werden auch aus eingebetteten Dokumenten und Templates entfernt. Eine CSP in der Kopie sperrt Skriptausführung und weitere Ressourcenabrufe. CSS-Animationen werden auf ihren aktuellen Zustand eingefroren; Medien erhalten eine statische Darstellung.
+**Eine HTML-Datei:** Die Erweiterung enthält ein lokal erzeugtes Bundle aus **SingleFile Core 1.6.19** mit vollständiger Lizenz und Herkunftshinweis. Die unveränderten Originalquellen liegen unter `vendor/single-file-core/` im separaten Quellpaket. `scripts/build-html-vendor.mjs` erzeugt das Bundle mit nachvollziehbaren Transformationen für die unterstützten Exportfunktionen. Nicht unterstützte Upstream-Optionen werden abgewiesen; Seiten dürfen die festen Exportoptionen nicht überschreiben. Zur Aufnahme wird kein externer Speicherdienst aufgerufen. Gespeichert wird der aktuelle, bereits durch JavaScript aufgebaute DOM-Zustand; unterstützte CSS-, Bild- und Schriftressourcen werden in die Datei eingebettet. Zugängliche Canvas-Inhalte, Shadow DOM und Frames werden soweit möglich übernommen. JavaScript, Ereignishandler und `javascript:`-URLs werden auch aus eingebetteten Dokumenten und Templates entfernt. Eine CSP in der Kopie sperrt Skriptausführung und weitere Ressourcenabrufe. CSS-Animationen werden auf ihren aktuellen Zustand eingefroren; Medien erhalten eine statische Darstellung.
 
 Normale Links bleiben als vollständige URLs erhalten; lokale Sprungmarken bleiben lokal. Erkennbare einfache JavaScript-Navigationen mit einem festen Ziel werden in normale Links umgewandelt, etwa `location.href='/details/123'` oder `location.assign('/details/123')`. Beliebige JS-Schaltflächen und Anwendungen funktionieren in der Kopie nicht weiter. Auch hier ist `loadDeferred:true` Standard; der vorbereitende Scroll-Durchlauf ist auf acht Sekunden beziehungsweise 100 Schritte und 100.000 CSS-Pixel begrenzt. Die HTML-Aufnahme dauert höchstens 60 Sekunden und lädt Ressourcen bis 12 MiB pro Ressource beziehungsweise insgesamt 64 MiB nach. Die Antwort nennt unter `warnings` fehlende, zu große oder nicht vollständig übernommene Ressourcen und Seitenelemente. Geschützte Frames, DRM-Inhalte und geschlossene Shadow Roots können unvollständig bleiben. HTML kann bei anderer Fensterbreite neu umbrechen; für feste Bilddarstellung PNG verwenden.
 
@@ -330,13 +364,17 @@ npm test
 npm run package
 ```
 
-`check` prüft JavaScript-Syntax und Manifestkonsistenz. Tests umfassen Protokoll-/Serverlogik, Erweiterungslogik und Setup in temporären Verzeichnissen; Setup-Tests registrieren nichts im Benutzerprofil. `npm ci` installiert für Entwicklung zusätzlich `web-ext` als lokale Test-/Lint-Abhängigkeit; eine globale Installation ist nicht nötig. Mit `npx --no-install web-ext lint --source-dir extension` lässt sich die Erweiterung zusätzlich prüfen. Bei einer Projekt-Runtime kann etwa `.\.runtime\node\node.exe --test test/*.test.mjs` direkt ausgeführt werden. Die Pakete entstehen unter `dist/`: `firefox-codex-mcp-extension.zip` enthält die Erweiterung, `firefox-codex-mcp-source.zip` das Projekt einschließlich Lockdatei ohne Abhängigkeiten, Projekt-Runtime, Tokens und lokale Konfiguration. Ein automatisierter Test ersetzt keinen vollständigen Test mit dem eigenen Firefox-Profil.
+`check` prüft JavaScript-Syntax und Manifestkonsistenz. Tests umfassen Protokoll-/Serverlogik, Erweiterungslogik und Setup in temporären Verzeichnissen; Setup-Tests registrieren nichts im Benutzerprofil. `npm ci` installiert für Entwicklung zusätzlich `web-ext` als lokale Test-/Lint-Abhängigkeit; eine globale Installation ist nicht nötig. Mit `npx --no-install web-ext lint --source-dir extension` lässt sich die Erweiterung zusätzlich prüfen. Bei einer Projekt-Runtime kann etwa `.\.runtime\node\node.exe --test test/*.test.mjs` direkt ausgeführt werden. `npm run package` erzeugt zuvor die selbständigen Einrichtungsskripte mit `scripts/build-setup-downloads.mjs`. Die Pakete entstehen als Standard-ZIP mit Deflate-Kompression unter `dist/`: `firefox-codex-mcp-extension.zip` enthält die unsignierte Erweiterung mit Einrichtungsseite und Serverpayload in den Skripten sowie das SingleFile-Bundle mit Lizenz und Herkunftshinweis; `firefox-codex-mcp-source.zip` enthält das Projekt einschließlich unveränderter Originalquellen unter `vendor/single-file-core/`, Lockdatei und Generatoren ohne Abhängigkeiten, Projekt-Runtime, Tokens und lokale Konfiguration. Das Quellpaket ist bei einer AMO-Einreichung für Reviewer bereitzustellen. Die Reviewer-Buildanleitung steht in [docs/AMO-submission.md](docs/AMO-submission.md). Ein automatisierter Test ersetzt keinen vollständigen Test mit dem eigenen Firefox-Profil.
 
 Bei „Native host not found“ die Registrierung und den Manifestpfad prüfen, dann die Erweiterung neu laden. Bei Verbindungsfehlern den Popup-Schalter, den gespeicherten Port und die Node-Pfade prüfen. Bei Portkonflikten einen anderen Port einrichten und Firefox-Erweiterung sowie Codex-Verbindung neu starten. Die Erweiterung kommuniziert mit dem gestarteten Firefox-Profil. Gleichzeitiger Betrieb mehrerer Profile ist in dieser Version nicht vorgesehen: Die Native-Host-Registrierung gilt benutzerweit und ein Host belegt den konfigurierten Port.
 
-Unter Linux/macOS erzeugt `npm run setup` eine ausführbare Shell-Startdatei. Das generierte Hostmanifest kann nach Prüfung an den benutzerspezifischen Mozilla-Native-Messaging-Pfad kopiert werden. `--register-native` und `install.ps1` sind auf Windows ausgerichtet. Plattformpfade und Protokoll beschreibt [Mozilla Native Messaging](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging).
+Die Registrierung erfolgt pro Benutzer: unter Windows über `HKCU\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge`, unter Linux über `~/.mozilla/native-messaging-hosts/de.codex.firefox_bridge.json`, unter macOS über `~/Library/Application Support/Mozilla/NativeMessagingHosts/de.codex.firefox_bridge.json`. Der Registrierungsort ist vom eigentlichen Server-Installationsordner getrennt. Die Hostmanifest-Datei verweist auf den absoluten Launcherpfad und lässt ausschließlich die feste Add-on-ID zu. [Mozilla: Native-Manifests](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_manifests).
 
 ## Deinstallation
+
+Zum Entfernen der Registrierung über die Add-on-Einrichtung das passende `unregister.ps1` beziehungsweise `unregister.sh` herunterladen und außerhalb von Firefox ausführen. Mit `-ProjectRoot "C:\Tools\FirefoxCodexMCP"` beziehungsweise `--root "$HOME/.local/share/firefox-codex-mcp"` lässt sich die zugehörige Installation ausdrücklich angeben. Diese Deregistrierung entfernt die eindeutig zugeordneten Native-Host- und unveränderten Client-Einträge; Serverdateien und lokale Konfiguration bleiben erhalten. Das Add-on bei Bedarf separat unter `about:addons` entfernen.
+
+Unter Windows benötigt die Native-Host-Deregistrierung weder Node noch npm. Die zusätzliche Client-Bereinigung braucht Node 22 oder neuer und die installierten Laufzeitabhängigkeiten im Serverordner. Fehlen sie, bleibt die Native-Host-Abmeldung erfolgreich; das Skript meldet die nicht abgeschlossene Client-Bereinigung als Teilfehler mit Rückgabecode `2`. Unter Linux/macOS benötigt `unregister.sh` auch für die Native-Host-Abmeldung Node 22 oder neuer, aber kein npm. Mit `-NoRegisterClients` beziehungsweise `--no-register-clients` lässt sich die Client-Bereinigung bewusst überspringen.
 
 In `install.cmd` die **4** wählen oder `uninstall.ps1` ausführen. Das funktioniert auch aus einer neu heruntergeladenen Kopie, etwa im Downloadordner, wenn der ursprüngliche Projektordner bereits gelöscht wurde. Eine erneute Installation ist dafür nicht erforderlich; das Entfernen der Native-Host-Registrierung und der zugehörigen lokalen Dateien benötigt weder Node noch npm.
 
@@ -350,7 +388,6 @@ Das Firefox-Add-on unter `about:addons` separat entfernen. Eventuell übersprung
 
 ## TODO / MAYBE
 
-Die Bereitstellung bleibt vorerst bei GitHub. Ein Upload zu Mozilla beziehungsweise eine Veröffentlichung im Add-on-Katalog ist derzeit nicht vorgesehen.
+Die lokale Vorbereitung umfasst Add-on-Einrichtung, Registrierungsskripte, ein unsigniertes Erweiterungspaket und ein nachvollziehbar baubares Quellpaket. Upload, Signierung und Veröffentlichung bei Mozilla sind ein gesonderter, noch nicht ausgeführter Schritt.
 
-- [ ] Optional eine von Mozilla signierte XPI für die dauerhafte Add-on-Installation anbieten, öffentlich gelistet oder zur eigenen Verteilung. Bis zu einer ausdrücklichen Entscheidung bleibt dies eine Idee.
-- [ ] Optional eine geführte Einrichtung der KI-Apps im Add-on anbieten. Die Registrierung würde der separat installierte lokale Helfer ausführen; die erstmalige Installation dieses Helfers bleibt erforderlich.
+- [ ] Nach ausdrücklicher Entscheidung eine von Mozilla signierte XPI anbieten, öffentlich gelistet oder zur eigenen Verteilung. Vorbereitung: [docs/AMO-submission.md](docs/AMO-submission.md).

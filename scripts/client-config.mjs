@@ -249,10 +249,13 @@ function absoluteEnv(value, name) {
 }
 
 /** Detect existing configuration directories, not an assertion that an app is installed. */
-export async function detectClients({ home = homedir(), appData, localAppData, env = process.env } = {}) {
+export async function detectClients({ home = homedir(), appData, localAppData, env = process.env, platform = process.platform } = {}) {
   home = absoluteEnv(home, 'home');
-  appData ??= env.APPDATA || join(home, 'AppData', 'Roaming');
-  localAppData ??= env.LOCALAPPDATA || join(home, 'AppData', 'Local');
+  const windows = platform === 'win32' || platform === 'win', mac = platform === 'darwin' || platform === 'mac';
+  if (!windows && !mac && platform !== 'linux') conflict('Client-Erkennung unterstützt Windows, Linux und macOS.');
+  const xdg = (value, fallback) => typeof value === 'string' && isAbsolute(value) ? value : fallback;
+  appData ??= windows ? env.APPDATA || join(home, 'AppData', 'Roaming') : mac ? join(home, 'Library', 'Application Support') : xdg(env.XDG_CONFIG_HOME, join(home, '.config'));
+  localAppData ??= windows ? env.LOCALAPPDATA || join(home, 'AppData', 'Local') : xdg(env.XDG_DATA_HOME, join(home, '.local', 'share'));
   const definitions = [
     { id: 'codex', label: 'Codex', folder: env.CODEX_HOME || join(home, '.codex'), filename: 'config.toml', format: 'toml' },
     { id: 'claude-code', label: 'Claude Code (CLI / VS Code)', folder: env.CLAUDE_CONFIG_DIR || home, marker: env.CLAUDE_CONFIG_DIR || join(home, '.claude'), filename: '.claude.json', format: 'json', extra: { type: 'stdio', timeout: 180000 } },
@@ -260,7 +263,7 @@ export async function detectClients({ home = homedir(), appData, localAppData, e
     { id: 'lm-studio', label: 'LM Studio', folder: join(home, '.lmstudio'), filename: 'mcp.json', format: 'json' },
     { id: 'eigent', label: 'Eigent', folder: join(home, '.eigent'), filename: 'mcp.json', format: 'json' },
     { id: 'gemini', label: 'Gemini CLI / Code Assist', folder: join(env.GEMINI_CLI_HOME || home, '.gemini'), filename: 'settings.json', format: 'json', extra: { timeout: 180000 } },
-    { id: 'hermes', label: 'Hermes', folder: env.HERMES_HOME || join(localAppData, 'hermes'), filename: 'config.yaml', format: 'yaml', keys: ['mcp_servers'], extra: { timeout: 180 } },
+    { id: 'hermes', label: 'Hermes', folder: env.HERMES_HOME || (windows ? join(localAppData, 'hermes') : join(home, '.hermes')), filename: 'config.yaml', format: 'yaml', keys: ['mcp_servers'], extra: { timeout: 180 } },
     { id: 'openclaw', label: 'OpenClaw', folder: env.OPENCLAW_STATE_DIR || join(home, '.openclaw'), filename: 'openclaw.json', format: 'json5', keys: ['mcp', 'servers'], extra: { requestTimeoutMs: 180000 } },
   ];
   const results = [];
@@ -275,9 +278,12 @@ export async function detectClients({ home = homedir(), appData, localAppData, e
         } else if (!env.OPENCLAW_STATE_DIR && (env.OPENCLAW_PROFILE || env.OPENCLAW_HOME)) candidate.skip = 'OpenClaw-Profil ist mehrdeutig; zuerst OPENCLAW_CONFIG_PATH explizit setzen.';
       }
       if (candidate.id === 'hermes' && !env.HERMES_HOME) {
-        const legacy = join(home, '.hermes'), modernExists = await exists(candidate.folder), legacyExists = await exists(legacy);
-        if (modernExists && legacyExists) candidate.skip = 'Mehrere Hermes-Konfigurationsordner; zuerst HERMES_HOME explizit setzen.';
-        else if (legacyExists) candidate.folder = legacy;
+        const legacy = join(home, '.hermes');
+        if (resolve(candidate.folder) !== resolve(legacy)) {
+          const modernExists = await exists(candidate.folder), legacyExists = await exists(legacy);
+          if (modernExists && legacyExists) candidate.skip = 'Mehrere Hermes-Konfigurationsordner; zuerst HERMES_HOME explizit setzen.';
+          else if (legacyExists) candidate.folder = legacy;
+        }
       }
       candidate.folder = absoluteEnv(candidate.folder, `${candidate.id}-Konfigurationsordner`);
       candidate.path = join(candidate.folder, candidate.filename);
@@ -366,12 +372,12 @@ async function writeAtomic(path, before, content) {
   }
 }
 
-export async function configureClients({ root, nodePath = process.execPath, home = homedir(), appData, localAppData, env = process.env, remove = false, dryRun = false }) {
+export async function configureClients({ root, nodePath = process.execPath, home = homedir(), appData, localAppData, env = process.env, platform = process.platform, remove = false, dryRun = false }) {
   root = absoluteEnv(root, 'root');
   nodePath = absoluteEnv(nodePath, 'nodePath');
   const base = { command: nodePath, args: [join(root, 'server', 'mcp.mjs'), '--config', join(root, '.local', 'config.json')] };
   const results = [];
-  for (const candidate of await detectClients({ home, appData, localAppData, env })) {
+  for (const candidate of await detectClients({ home, appData, localAppData, env, platform })) {
     const result = { id: candidate.id, label: candidate.label, path: candidate.path || null };
     try {
       if (candidate.skip) { results.push({ ...result, status: 'skipped', message: candidate.skip }); continue; }

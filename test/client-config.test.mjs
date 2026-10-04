@@ -21,7 +21,8 @@ async function fixture(t) {
     assert.ok(child && !child.startsWith('..') && !isAbsolute(child));
     await rm(home, { recursive: true, force: true });
   });
-  return { root, nodePath, home, appData: join(home, 'roaming'), localAppData: join(home, 'local'), env: {} };
+  // These fixtures deliberately model Windows discovery on every CI system.
+  return { root, nodePath, home, platform: 'win32', appData: join(home, 'roaming'), localAppData: join(home, 'local'), env: {} };
 }
 const merge = (text, options = {}) => mergeConfigText({ text, entry, ...options });
 

@@ -3,6 +3,10 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { configPathFromArgs, loadConfig } from './config.mjs';
 import { encodeNativeMessage, NativeDecoder } from './framing.mjs';
+import { readRegistrationStatus } from '../scripts/registration.mjs';
+
+export const HOST_VERSION = '1.0.2';
+export const PROTOCOL_VERSION = 1;
 
 const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','search_history','list_bookmark_folders','search_bookmarks','create_bookmark','update_bookmark','move_bookmark','delete_bookmark','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','wait_for','save_png','save_html','save_pdf','export_chunk','export_release']);
 const error = (code, message) => ({ error: { code, message } });
@@ -15,7 +19,7 @@ function reply(response, status, body) {
 }
 
 // This HTTP endpoint is a private IPC bridge, not a network MCP endpoint.
-export function createBridge({ port, token, input = process.stdin, output = process.stdout, timeoutMs = 30_000, contentTimeoutMs = 130_000, exportTimeoutMs = 280_000 }) {
+export function createBridge({ port, token, registration = null, input = process.stdin, output = process.stdout, timeoutMs = 30_000, contentTimeoutMs = 130_000, exportTimeoutMs = 280_000 }) {
   if (!Number.isInteger(exportTimeoutMs) || exportTimeoutMs < 1 || exportTimeoutMs > 600_000) throw new Error('Export timeout must be from 1 to 600000 milliseconds.');
   const pending = new Map();
   let ready = false;
@@ -63,7 +67,7 @@ export function createBridge({ port, token, input = process.stdin, output = proc
       reply(response, 401, error('UNAUTHORIZED', 'Bridge authentication failed.')); return;
     }
     if (request.method === 'GET' && request.url === '/health') {
-      reply(response, 200, { result: { connected: ready, version: '1.0.2' } }); return;
+      reply(response, 200, { result: { connected: ready, version: HOST_VERSION } }); return;
     }
     if (request.method !== 'POST' || request.url !== '/rpc') {
       reply(response, 404, error('NOT_FOUND', 'Unknown bridge endpoint.')); return;
@@ -143,6 +147,9 @@ export function createBridge({ port, token, input = process.stdin, output = proc
     server, close,
     async listen() {
       if (closed) throw new Error('Firefox disconnected before bridge startup.');
+      // Report setup separately from the HTTP bridge. A occupied port must not
+      // hide a confirmed companion installation or appear as missing setup.
+      send({ type: 'setup_status', hostVersion: HOST_VERSION, protocolVersion: PROTOCOL_VERSION, registration });
       await new Promise((resolve, reject) => {
         server.once('error', reject);
         server.listen(port, '127.0.0.1', () => { server.removeListener('error', reject); resolve(); });
@@ -157,7 +164,8 @@ export function createBridge({ port, token, input = process.stdin, output = proc
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const bridge = createBridge(await loadConfig(configPathFromArgs()));
+    const configPath = configPathFromArgs();
+    const bridge = createBridge({ ...await loadConfig(configPath), registration: await readRegistrationStatus(configPath) });
     process.once('SIGINT', () => { bridge.close(); process.exit(0); });
     process.once('SIGTERM', () => { bridge.close(); process.exit(0); });
     try { await bridge.listen(); }
