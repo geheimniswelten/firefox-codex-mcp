@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "version": "1.0.6",
   "registrationRevision": 1,
-  "archiveSha256": "461fdaf88d7cad7942e132c4b874a1cab1382fbf702d4234659684ddc0a324cd",
+  "archiveSha256": "c336cbcb678b26a404c0ad8655f3d7d5a9cb50f7257ce08d127d83a04ccd8017",
   "files": [
     {
       "path": "LICENSE.md",
@@ -14,39 +14,39 @@
     },
     {
       "path": "README.md",
-      "sha256": "514bb6d2909786ef1ba38e47f91ccfa489f36d2c93aa51c30959595c3f9fde99"
+      "sha256": "afe9ceadfd769644962d82c1c663d75967fd93389a71d4fda8a57c6517f822ef"
     },
     {
       "path": "install.ps1",
-      "sha256": "cbb567728ada1b3d7cf37d319f475e79336e7594ea3020ab2fd55f14f1bba423"
+      "sha256": "e63afb215b9ae10956408246286057e4154110dc03198ec57d83a52055f12e82"
     },
     {
       "path": "package-lock.json",
-      "sha256": "25bfc26e16d4571242aae87be46913fdeab714c0a09c6affa6a98ab8b165ad3e"
+      "sha256": "760777bb5aa11076927729145feb8b079732dd4957af3820833bf80cef592bed"
     },
     {
       "path": "package.json",
-      "sha256": "8da295326368ca6469164488aaf23cf2ca887d122e1df8377a78e9018799215a"
+      "sha256": "e6c49c2a237ff22030690eb7a8ff9e3ae4724f0a283089991d94808d837208ca"
     },
     {
       "path": "scripts/client-config.mjs",
-      "sha256": "39641717db09e3176c79f355833c21ff3831144ebc1c3e1ebf20b2a7afbabbd4"
+      "sha256": "80d95119647880e10e0efbdd7b078d0b7590a09549ef1e57d49265e85eeea8cd"
     },
     {
       "path": "scripts/companion-payload.mjs",
-      "sha256": "566ba577f1d714903f22bd86a96530c62be73cf87537bcd2afeb3054107a1567"
+      "sha256": "3aa016ff357c36a83efd9dbe918cdeb79821ad6ce21c445e6c84d6ec229ec89b"
     },
     {
       "path": "scripts/configure-clients.mjs",
-      "sha256": "c30cc5fb13a6f21b503d2a0a1ceb44772f70bcd4730d661ad6cde6be0d5550f9"
+      "sha256": "a48ac6cff66cebd849c2bd6e182e95d0b6f91de99b8ea23c57935879bbbb36d2"
     },
     {
       "path": "scripts/finish-relocation.ps1",
-      "sha256": "58e7dd9ce3a999e3a3fb0623f43e359e84e617036043dbd01b4db204e6b83d22"
+      "sha256": "bde9947ff963834cb6dce73c4cb658519c2ab950bb718d8d92cf200d5bfff3a9"
     },
     {
       "path": "scripts/install-companion.mjs",
-      "sha256": "1097ff41e96f04dcb78e3aa3234cbc8e837a50e72378de19b4c2bcc40b2bff8c"
+      "sha256": "30319d90df4d3a059f56cfda302b9019c3d4bc9778ef4aed8626402cfdcfb959"
     },
     {
       "path": "scripts/node-runtime.ps1",
@@ -58,11 +58,11 @@
     },
     {
       "path": "scripts/registration.mjs",
-      "sha256": "bedb0bcb20699805340545ca0d9902f1e12b4f0528921b0609c342f56def2a21"
+      "sha256": "6a069f3444189918620de7d03c087a6987e1d9c8422fb3608cdc0306d1dc890e"
     },
     {
       "path": "scripts/setup.mjs",
-      "sha256": "bd05955ea0deda5fafda929e97a049d2597202d552f16f08596c0d9b5b8cc9d5"
+      "sha256": "8d5a43874ab210e5d34ef9dbe284c23228fac63209c395570a3fb199647e61fa"
     },
     {
       "path": "server/bridge-client.mjs",
@@ -82,7 +82,7 @@
     },
     {
       "path": "server/mcp.mjs",
-      "sha256": "d9832e5815bf1b998cbb430615fca01aa3eeb0ec89fa13129f5055bc91176d00"
+      "sha256": "d6e3e9f2386166e274734d42d77d7641c09b253a2663dfe34b2e7b0a568498ae"
     },
     {
       "path": "server/native-host.mjs",
@@ -94,7 +94,7 @@
     },
     {
       "path": "uninstall.ps1",
-      "sha256": "45001723ab6c714bba3fe1ae9c0b99f8c203040120cc996df553d8384621cb81"
+      "sha256": "0d99a0b3c7fe32831cd5f78d84038646810827aa13e6303206f9d4294224f04e"
     }
   ]
 }

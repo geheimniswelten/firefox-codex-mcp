@@ -1,5 +1,11 @@
 # Prüfstand vom 5. Oktober 2026
 
+## Manueller ZIP-Build unter Windows
+
+`build.cmd` und `build.ps1` im Repository-Hauptverzeichnis starten einen eigenständigen Paketbuild. Die vorhandene Node-Runtime-Suche wird wiederverwendet. Standardmäßig installiert `npm ci --include=dev` die festgelegten Build-Abhängigkeiten; danach folgen Syntax-/Manifestprüfung, Neubau von Bundle und Einrichtungsskripten, beide ZIPs und der lokale AMO-Linter. Arbeitsverzeichnis und Prozess-PATH werden anschließend wiederhergestellt. Der Starter verwendet die vorhandene Versionsnummer und ruft weder Native-Host-Registrierung noch Client-Konfiguration auf.
+
+Sieben isolierte Windows-PowerShell-5.1-Tests bestanden. Sie prüfen beide npm-Aufrufwege, Verzeichnisse mit Leerzeichen und Apostroph, Wiederherstellung der Aufrufumgebung, `-SkipDependencies` sowie Abbruch ohne weitere Schritte nach npm-, Syntax-, Paket- und Linterfehlern. Die Paketierung schließt lokale Chat-Exporte und alte signierte XPI-Dateien im Hauptverzeichnis sowie lokale Sicherungsordner aus.
+
 ## Korrektur 1.0.6: Skript-Download und Pfadwechsel
 
 Symbolleistenmenü und Einrichtungsseite prüfen den Status weiterhin alle 1,5 Sekunden, ersetzen aber nur tatsächlich geänderte Texte. Damit bleiben Textknoten und Markierung bei unveränderten Statusantworten und Hintergrundereignissen erhalten. Die Freigabebeschreibung wird vollständig zusammengesetzt, bevor sie bei einer Änderung geschrieben wird; neue Anfragen, Ablauf und Diagnoseänderungen bleiben sofort sichtbar. Der gezielte Lauf von `popup-selection`, `popup-permissions`, `approval-popup`, `setup-ui` und `setup-status` bestand mit **72 erfolgreichen Tests, 0 Fehlern und 0 Skips**. Die Syntaxprüfung bestätigte **123 JavaScript-Dateien** und das Manifest.

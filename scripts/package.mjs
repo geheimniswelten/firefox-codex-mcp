@@ -7,12 +7,14 @@ import { buildHtmlVendor } from './single-file-build.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
-const excluded = new Set(['node_modules', '.runtime', '.local', 'dist', '.git', 'coverage', 'work']);
+const excluded = new Set(['node_modules', '.runtime', '.local', 'dist', '.git', 'coverage', 'work', '__history', '__recovery', '__pycache__']);
 
 async function collect(base, directory = base) {
   const files = [];
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     if (excluded.has(entry.name) || entry.name.startsWith('.env') || /\.(log|pem|key|pfx)$/iu.test(entry.name)) continue;
+    // Local chat exports and previously signed add-ons are not project sources.
+    if (directory === root && (/\.xpi$/iu.test(entry.name) || /^Chat - .*\.md$/iu.test(entry.name))) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...await collect(base, path));
     else if (entry.isFile()) files.push({ name: relative(base, path).split(sep).join('/'), data: await readFile(path) });

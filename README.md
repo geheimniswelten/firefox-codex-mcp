@@ -1,30 +1,30 @@
 ### [DE] Kurz
 
-- Firefox mit KI verwalten: Tabs/Fenster/Chronic/Lesezeichen/Favoriten/Plugins suchen/durchsuchen/schließen/verschieben/...
-   - Tabs/Chronik nach Titel, URL und Zeitraum durchsuchen; Lesezeichen und Ordner einschließlich Symbolleiste suchen, anlegen, bearbeiten, verschieben und löschen.
+- Firefox mit KI verwalten: Tabs/Fenster/Chronic/Lesezeichen/Favoriten/Plugins (suchen/durchsuchen/schließen/verschieben/...)
+   - Tabs/Chronik nach Titel, URL und Zeitraum durchsuchen. Lesezeichen und Ordner einschließlich Symbolleiste (suchen/anlegen/bearbeiten/verschieben/löschen)
    - Codex, Claude Code (CLI / VS Code), Claude Desktop, Eigent, Gemini CLI / Code Assist, Gemini Desktop, Hermes, LM Studio und OpenClaw.
-- Für den bisherigen Entwicklungsweg downloaden und install.cmd ausführen (leider nach jedem Browser-Neustart erneut)
-   - in about:debugging#/runtime/this-firefox "Temporäres Add-on laden" -> ...\firefox-codex-mcp\extension\manifest.json
-   - alternativ im geladenen Add-on die Einrichtungsseite öffnen, das passende Registrierungsskript herunterladen und außerhalb von Firefox ausführen
-   - [XPI](https://addons.mozilla.org/firefox/downloads/file/5086376/98f93549b0104dbda62c-1.0.5.xpi) dauerhaft installieren und Registrierungsskript ausführen
-- Desktop-Firefox unter Windows, Linux und macOS; ein lokaler Native-Messaging-Helfer ist erforderlich
+- Inststallation:
+   - lokal/[temporär](Install-temporarily.png): build.cmd -> install.cmd -> 1 or 2+3 -> about:debugging#/runtime/this-firefox -> Temmporätes Add-on laden -> extension\\manifest.json, dist\\*.zip or *.xpi (hält bis zum nächsten Neustart)
+   - manuell-[permanent(xpi)](Install-XPI-manualy.png): about:addons -> [Optionen] -> Add-on aus Datei installieren... -> [*.xpi](https://github.com/geheimniswelten/firefox-codex-mcp/releases) -> Add-on Einstellungen -> Einrichtung -> install.ps1 ausführen
+   - online / Firefox Add-ons: aktuell im [AMO](## "addons.mozilla.org") nicht öffentlich gelistet (privat)
+- Desktop-Firefox unter Windows, Linux und macOS (ein lokaler Native-Messaging-Helfer ist erforderlich)
 - Zugriff auf Seiteninhalte standardmäßig gesperrt (bei Erstzugriff wird nach Freigabe gefragt)
-- Export von Webseiten als PNG und Single-HTML (auch als PDF -> öffnet aber nur den Speichern-Dialog des FF)
+- Export von Webseiten als PNG und Single-HTML (auch als PDF -> öffnet aber nur den Speichern-Dialog des Firefox)
 - Debugfunktionen: Zugriff auf Seiteninhalte, aber vor allem auch um lokal Webseiten zu entwickeln und zu testen.
 
 ### [EN] Short
 
-- Manage Firefox with AI: find, search, close, move, and organize tabs/windows/history/bookmarks/favorites/add-ons.
-   - Search tabs and browsing history by title, URL, and time period; find, create, edit, move, and delete bookmarks and folders, including those on the bookmarks toolbar.
-   - Codex, Claude Code (CLI / VS Code), Claude Desktop, Eigent, Gemini CLI / Code Assist, Gemini Desktop, Hermes, LM Studio, and OpenClaw.
-- For the existing development workflow, download the project and run `install.cmd` (unfortunately, temporary add-ons must be reloaded after every browser restart).
-   - Open `about:debugging#/runtime/this-firefox`, select "Load Temporary Add-on", and choose `...\firefox-codex-mcp\extension\manifest.json`.
-   - Alternatively, open the setup page in the loaded add-on, download the appropriate registration script, and run it outside Firefox.
-   - For permanent installation, install the [XPI](https://addons.mozilla.org/firefox/downloads/file/5086376/98f93549b0104dbda62c-1.0.5.xpi) and run the registration script.
-- Desktop Firefox on Windows, Linux, and macOS; a local native messaging helper is required.
-- Access to page content is blocked by default (approval is requested on first access).
-- Export webpages as PNG or a single HTML file (PDF export is also available and opens Firefox's Save dialog).
-- Debugging features: access page content, particularly for developing and testing websites locally.
+- Manage Firefox with AI: tabs, windows, history, bookmarks, favorites and extensions (search/browse/close/move/...)
+   - Search tabs/history by title, URL and time range. Bookmarks and folders, including those on the bookmarks toolbar (find/create/edit/move/delete)
+   - Codex, Claude Code (CLI / VS Code), Claude Desktop, Eigent, Gemini CLI / Code Assist, Gemini Desktop, Hermes, LM Studio and OpenClaw.
+- Installation:
+   - Local/[temporary](Install-temporarily.png): build.cmd -> install.cmd -> 1 or 2+3 -> about:debugging#/runtime/this-firefox -> Load Temporary Add-on -> extension\manifest.json, dist\*.zip or *.xpi (remains installed until the next browser restart)
+   - Manual/[permanent(xpi)](Install-XPI-manualy.png): about:addons -> [gear menu] -> Install Add-on from File... -> [*.xpi](https://github.com/geheimniswelten/firefox-codex-mcp/releases) -> Add-on Settings -> Setup -> run install.ps1
+   - Online / Firefox Add-ons: currently unlisted (private) on [AMO](https://addons.mozilla.org/)
+- Desktop Firefox on Windows, Linux and macOS (a local native messaging helper is required)
+- Access to page content is blocked by default (permission is requested on first access)
+- Export web pages as PNG and single-file HTML (PDF export is also available, but only opens Firefox’s save dialog)
+- Debugging features: access page content, particularly to develop and test websites locally.
 
 # Firefox ↔ Codex MCP
 
@@ -378,12 +378,24 @@ Das Firefox-Manifest deklariert die Weitergabe von Browseraktivität, Lesezeiche
 
 Der geprüfte Stand und die Ergebnisse der Tests mit echtem Firefox sind in [TESTING.md](TESTING.md) dokumentiert.
 
+Unter Windows genügt ein Doppelklick auf **`build.cmd` im Repository-Hauptverzeichnis**. Der Starter findet Node.js wie der Installer, installiert die Entwicklungsabhängigkeiten aus der Lockdatei, prüft Syntax und Manifest, baut das SingleFile-Bundle sowie alle Einrichtungsskripte neu, erzeugt beide ZIPs unter `dist/` und führt den lokalen AMO-Linter aus. Das Ergebnisfenster bleibt bis zur Taste `0` offen. Der Build verwendet die vorhandene Versionsnummer und führt keine Registrierung oder Installation des Native Hosts aus. `install.cmd` und `install.ps1` erzeugen die lokale Einrichtung; ZIP-Pakete entstehen mit dem Build-Starter.
+
+Für einen Aufruf ohne wartendes Ergebnisfenster:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+```
+
+`-SkipDependencies` verwendet bereits installierte Build-Abhängigkeiten. `-NoDownload` verhindert den automatischen Download einer fehlenden Node-Runtime; npm kann weiterhin Abhängigkeiten herunterladen. Auf Linux/macOS und für direkte npm-Aufrufe gelten die folgenden Befehle:
+
 ```powershell
 npm ci
 npm run check
 npm test
 npm run package
 ```
+
+Lokale Chat-Exporte mit dem Namen `Chat - *.md`, bereits signierte `.xpi`-Dateien im Hauptverzeichnis und lokale Sicherungsordner werden aus dem Quellpaket ausgeschlossen.
 
 `check` prüft JavaScript-Syntax und Manifestkonsistenz. Tests umfassen Protokoll-/Serverlogik, Erweiterungslogik und Setup in temporären Verzeichnissen; Setup-Tests registrieren nichts im Benutzerprofil. `npm ci` installiert für Entwicklung zusätzlich `web-ext` als lokale Test-/Lint-Abhängigkeit; eine globale Installation ist nicht nötig. Mit `npx --no-install web-ext lint --source-dir extension` lässt sich die Erweiterung zusätzlich prüfen. Bei einer Projekt-Runtime kann etwa `.\.runtime\node\node.exe --test test/*.test.mjs` direkt ausgeführt werden. `npm run package` erzeugt zuvor die selbständigen Einrichtungsskripte mit `scripts/build-setup-downloads.mjs`. Die Pakete entstehen als Standard-ZIP mit Deflate-Kompression unter `dist/`: `firefox-codex-mcp-extension.zip` enthält die unsignierte Erweiterung mit Einrichtungsseite und Serverpayload in den Skripten sowie das SingleFile-Bundle mit Lizenz und Herkunftshinweis; `firefox-codex-mcp-source.zip` enthält das Projekt einschließlich unveränderter Originalquellen unter `vendor/single-file-core/`, Lockdatei und Generatoren ohne Abhängigkeiten, Projekt-Runtime, Tokens und lokale Konfiguration. Das Quellpaket ist bei einer AMO-Einreichung für Reviewer bereitzustellen. Die Reviewer-Buildanleitung steht in [docs/AMO-submission.md](docs/AMO-submission.md). Ein automatisierter Test ersetzt keinen vollständigen Test mit dem eigenen Firefox-Profil.
 
