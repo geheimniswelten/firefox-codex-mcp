@@ -5,7 +5,7 @@ import { configPathFromArgs, loadConfig } from './config.mjs';
 import { encodeNativeMessage, NativeDecoder } from './framing.mjs';
 import { readRegistrationStatus } from '../scripts/registration.mjs';
 
-export const HOST_VERSION = '1.0.2';
+export const HOST_VERSION = '1.0.5';
 export const PROTOCOL_VERSION = 1;
 
 const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','search_history','list_bookmark_folders','search_bookmarks','create_bookmark','update_bookmark','move_bookmark','delete_bookmark','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','wait_for','save_png','save_html','save_pdf','export_chunk','export_release']);

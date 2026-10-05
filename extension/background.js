@@ -13,6 +13,10 @@
   let confirmationWrites = Promise.resolve();
   let queue = Promise.resolve();
   const waits = new Map();
+  const activeRequests = new Set(), FRAME_MS = 240, MIN_ACTIVITY_MS = 800, QUIET_MS = 200, RECENT_DOTS_MS = 10000;
+  let activityTimer = null, activityFrame = 0, activityUntil = 0, wasAnimating = false;
+  let recentTimer = null, recentUntil = 0;
+  let wantedIcon = null, appliedIcon = null, applyingIcon = false, badgeText = null, titleText = null;
   const cancellation = (code, message) => Object.assign(new Error(message), { code });
   function abortWaits() {
     for (const controller of waits.values()) controller.abort(cancellation("MCP_DISABLED", "Die MCP-Verbindung wurde beendet."));
@@ -73,13 +77,71 @@
     if (prompt && Date.now() >= prompt.expiresAt) finishPrompt(false, prompt);
     return { ...state, lastError: state.lastError || metadataError, setup: setupState(), settings: { ...policy.settings }, sessionExpiresAt: policy.settings.contentMode === "ask-session" ? policy.expiresAt : null, fiveDayExpiresAt: policy.settings.contentMode === "ask-five-days" ? policy.expiresAt : null, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
   }
+  function setToolbarIcon(path) {
+    wantedIcon = path;
+    if (applyingIcon || appliedIcon === path) return;
+    applyingIcon = true;
+    // Only one icon write is in flight; a slow update skips intermediate frames.
+    Promise.resolve().then(() => browser.browserAction.setIcon({ path })).then(
+      () => { appliedIcon = path; }, () => { appliedIcon = null; }
+    ).finally(() => {
+      applyingIcon = false;
+      if (wantedIcon !== path) setToolbarIcon(wantedIcon);
+    });
+  }
+  function clearActivity() {
+    activeRequests.clear(); activityUntil = 0; activityFrame = 0; wasAnimating = false; recentUntil = 0;
+    if (activityTimer !== null) clearTimeout(activityTimer);
+    if (recentTimer !== null) clearTimeout(recentTimer);
+    activityTimer = null;
+    recentTimer = null;
+  }
+  function beginActivity() {
+    const request = {};
+    if (activeRequests.size === 0 && Date.now() >= activityUntil) activityUntil = Date.now() + MIN_ACTIVITY_MS;
+    activeRequests.add(request);
+    badge();
+    return request;
+  }
+  function finishActivity(request) {
+    // Completions from a disconnected port cannot restart the animation.
+    if (!activeRequests.delete(request)) return;
+    activityUntil = Math.max(activityUntil, Date.now() + QUIET_MS);
+    badge();
+  }
   function badge() {
     const status = iconStatus({ ...state, enabled: policy.settings.enabled });
     const setup = setupState();
     const setupBadge = setup.status === "update_required" ? "↑" : ["host_missing", "unverified", "connection_error"].includes(setup.status) ? "!" : "";
-    browser.browserAction.setBadgeText({ text: prompt ? "?" : setupBadge }).catch(() => {});
-    browser.browserAction.setIcon({ path: `icon-${status.color}.svg` }).catch(() => {});
-    browser.browserAction.setTitle({ title: `Firefox ↔ Codex · ${prompt ? "Inhaltsfreigabe erforderlich · Erweiterung anklicken" : setupBadge ? setup.label : status.label}` }).catch(() => {});
+    const animating = policy.settings.enabled && state.connected && !prompt && (activeRequests.size > 0 || Date.now() < activityUntil);
+    if (wasAnimating && !animating && policy.settings.enabled && state.connected && !prompt && activeRequests.size === 0) recentUntil = Date.now() + RECENT_DOTS_MS;
+    wasAnimating = animating;
+    const showRecent = status.color === "blue" && !prompt && Date.now() < recentUntil;
+    const text = prompt ? "?" : setupBadge;
+    const title = `Firefox ↔ Codex · ${prompt ? "Inhaltsfreigabe erforderlich · Erweiterung anklicken" : setupBadge ? setup.label : status.label}${animating ? " · MCP-Aktivität" : ""}`;
+    if (badgeText !== text) {
+      badgeText = text;
+      browser.browserAction.setBadgeText({ text }).catch(() => { if (badgeText === text) badgeText = null; });
+    }
+    if (titleText !== title) {
+      titleText = title;
+      browser.browserAction.setTitle({ title }).catch(() => { if (titleText === title) titleText = null; });
+    }
+    const restingIcon = showRecent ? "icon-recent-blue.svg" : `icon-${status.color}.svg`;
+    setToolbarIcon(animating ? `icon-activity-${status.color}-${activityFrame}.svg` : restingIcon);
+    if (animating && activityTimer === null) {
+      const delay = activeRequests.size ? FRAME_MS : Math.min(FRAME_MS, Math.max(1, activityUntil - Date.now()));
+      activityTimer = setTimeout(() => { activityTimer = null; activityFrame = (activityFrame + 1) % 3; badge(); }, delay);
+    } else if (!animating) {
+      if (activityTimer !== null) clearTimeout(activityTimer);
+      activityTimer = null; activityFrame = 0;
+    }
+    if (showRecent && !animating && recentTimer === null) {
+      recentTimer = setTimeout(() => { recentTimer = null; badge(); }, Math.max(1, recentUntil - Date.now()));
+    } else if (animating || !showRecent) {
+      if (recentTimer !== null) clearTimeout(recentTimer);
+      recentTimer = null;
+    }
   }
   function notifyPopup() {
     try { browser.runtime.sendMessage({ type: "bridge_status_changed" }).catch(() => {}); }
@@ -129,6 +191,7 @@
   }
   function disconnect() {
     clearHandshakeTimer(); setupMetadata = null; metadataError = null;
+    clearActivity();
     abortWaits();
     service.clearExports?.();
     service.clearHistorySnapshots?.();
@@ -167,7 +230,8 @@
     if (waits.has(message.id)) { send(target, { id: message.id, error: { code: "BUSY", message: "Diese Warteanfrage läuft bereits." } }); return; }
     const controller = ["wait_for", "search_history"].includes(message.method) ? new AbortController() : null;
     if (controller) waits.set(message.id, controller);
-    state.lastAccessAt = Date.now(); badge(); pendingCount += 1;
+    state.lastAccessAt = Date.now(); pendingCount += 1;
+    const activity = beginActivity();
     const execute = async () => {
       if (!policy.settings.enabled || port !== target) return;
       const assertLive = () => {
@@ -181,8 +245,9 @@
       } catch (error) { send(target, { id: message.id, error: errorData(error) }); }
     };
     // Permission prompts and history scans do not hold tab-control requests in the queue.
-    if (["read_content", "save_png", "save_html", "save_pdf", "wait_for", "search_history"].includes(message.method)) execute().finally(() => { pendingCount -= 1; if (controller) waits.delete(message.id); });
-    else queue = queue.then(execute).catch(() => {}).finally(() => { pendingCount -= 1; });
+    const completed = () => { pendingCount -= 1; if (controller) waits.delete(message.id); finishActivity(activity); };
+    if (["read_content", "save_png", "save_html", "save_pdf", "wait_for", "search_history"].includes(message.method)) execute().finally(completed);
+    else queue = queue.then(execute).catch(() => {}).finally(completed);
   }
   function connect() {
     if (!policy.settings.enabled || port) return;
@@ -192,7 +257,7 @@
       current.onMessage.addListener(message => receive(current, message));
       current.onDisconnect.addListener(() => {
         if (port !== current) return;
-        port = null; clearHandshakeTimer(); setupMetadata = null; metadataError = null; abortWaits(); service.clearExports?.(); service.clearHistorySnapshots?.(); finishPrompt(false); state.connected = false; state.connecting = false;
+        port = null; clearHandshakeTimer(); clearActivity(); setupMetadata = null; metadataError = null; abortWaits(); service.clearExports?.(); service.clearHistorySnapshots?.(); finishPrompt(false); state.connected = false; state.connecting = false;
         state.lastError = String(current.error?.message || "Native Host getrennt. Installation und Firefox-Profil prüfen.").slice(0, 1000);
         badge(); scheduleReconnect();
       });

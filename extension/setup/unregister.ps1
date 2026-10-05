@@ -1,6 +1,6 @@
 param([string]$ProjectRoot, [switch]$NoRegisterClients, [switch]$Help)
 $ErrorActionPreference = 'Stop'
-# Companion version: 1.0.2; registration revision: 1.
+# Companion version: 1.0.5; registration revision: 1.
 # Shared source for the standalone Windows downloads. ASCII for PowerShell 5.1.
 function Get-FirefoxInstalledRoot {
     $key = Get-Item -LiteralPath 'HKCU:\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge' -ErrorAction SilentlyContinue

@@ -6,7 +6,7 @@
 - Für den bisherigen Entwicklungsweg downloaden und install.cmd ausführen (leider nach jedem Browser-Neustart erneut)
    - in about:debugging#/runtime/this-firefox "Temporäres Add-on laden" -> ...\firefox-codex-mcp\extension\manifest.json
    - alternativ im geladenen Add-on die Einrichtungsseite öffnen, das passende Registrierungsskript herunterladen und außerhalb von Firefox ausführen
-   - [XPI](https://addons.mozilla.org/firefox/downloads/file/5085935/98f93549b0104dbda62c-1.0.2.xpi) dauerhaft installieren und Registrierungsskript ausführen
+   - [XPI](https://addons.mozilla.org/firefox/downloads/file/5086376/98f93549b0104dbda62c-1.0.5.xpi) dauerhaft installieren und Registrierungsskript ausführen
 - Desktop-Firefox unter Windows, Linux und macOS; ein lokaler Native-Messaging-Helfer ist erforderlich
 - Zugriff auf Seiteninhalte standardmäßig gesperrt (bei Erstzugriff wird nach Freigabe gefragt)
 - Export von Webseiten als PNG und Single-HTML (auch als PDF -> öffnet aber nur den Speichern-Dialog des FF)
@@ -20,7 +20,7 @@
 - For the existing development workflow, download the project and run `install.cmd` (unfortunately, temporary add-ons must be reloaded after every browser restart).
    - Open `about:debugging#/runtime/this-firefox`, select "Load Temporary Add-on", and choose `...\firefox-codex-mcp\extension\manifest.json`.
    - Alternatively, open the setup page in the loaded add-on, download the appropriate registration script, and run it outside Firefox.
-   - For permanent installation, install the [XPI](https://addons.mozilla.org/firefox/downloads/file/5085935/98f93549b0104dbda62c-1.0.2.xpi) and run the registration script.
+   - For permanent installation, install the [XPI](https://addons.mozilla.org/firefox/downloads/file/5086376/98f93549b0104dbda62c-1.0.5.xpi) and run the registration script.
 - Desktop Firefox on Windows, Linux, and macOS; a local native messaging helper is required.
 - Access to page content is blocked by default (approval is requested on first access).
 - Export webpages as PNG or a single HTML file (PDF export is also available and opens Firefox's Save dialog).
@@ -149,6 +149,10 @@ Das Popup bietet einen MCP-Ein-/Ausschalter, den Verbindungsstatus und die Inhal
 | Grün | Verbunden; kein Zugriff innerhalb der letzten 30 Minuten |
 | Gelb/Orange | Letzter Zugriff innerhalb von 30 Minuten, aber länger als eine Minute her |
 | Blau | Zugriff innerhalb der letzten Minute |
+
+Während laufender MCP-Anfragen wechseln drei größere blaue Punkte unten im Symbol von links nach rechts. Kurze Aufrufe und schnelle Serien werden optisch gebündelt. Sobald die Bewegung endet, bleiben die Punkte noch zehn Sekunden still sichtbar und verschwinden anschließend; die blaue Statusfarbe bleibt unabhängig davon eine Minute erhalten. Ein weiterer Zugriff startet die Bewegung und anschließend eine neue Zehn-Sekunden-Frist. Bei einer ausstehenden Inhaltsfreigabe hat das „?“ Vorrang und die Bewegung pausiert.
+
+`npm run test:firefox-activity` prüft die Symbolvarianten mit der echten Firefox-Symbolleisten-API und erzeugt eine Vorschau in 16, 32 und 48 Pixeln. Dafür wird ein eigenes Headless-Testprofil unter `work/` verwendet; Firefox und die Entwicklungsabhängigkeit `web-ext` sind erforderlich.
 
 „Verbunden“ bestätigt die lokale Erweiterung-/Host-Verbindung. Es bedeutet nicht, dass gerade ein Codex-Tool ausgeführt wird. Ohne laufenden Firefox bleiben MCP-Werkzeugdefinitionen verfügbar; Browseraufrufe melden einen Verbindungsfehler.
 

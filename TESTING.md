@@ -1,4 +1,26 @@
-# Prüfstand vom 4. Oktober 2026
+# Prüfstand vom 5. Oktober 2026
+
+## Punkte zehn Sekunden nach Bewegungsende ausblenden: Version 1.0.5
+
+Die stillstehenden Punkte verschwinden zehn Sekunden nach dem tatsächlichen Ende der Animation. Der kurze Nachlauf der Bewegung zählt noch nicht zur Stillstandsfrist. Eine neue Anfrage unterbricht die Stillstandsfrist; nach Ende der neuen Bewegung beginnen erneut zehn Sekunden. Die blaue Ein-Minuten-Statusfarbe bleibt unverändert. Ausblenden nutzt einen eigenen fristgebundenen Timer und wartet nicht auf den 15-Sekunden-Statusheartbeat. Freigabefragen behalten Vorrang; Deaktivierung und Verbindungsabbruch löschen beide Anzeigetimer.
+
+Alle **49 gezielten Tests** für Aktivität, Freigabepopup und Einrichtungsstatus bestanden. Geprüft wurden insbesondere das Ausblenden exakt zehn Sekunden nach Bewegungsende bei weiterhin blauem Status, eine neue Anfrage vor Ablauf der alten Frist, lange laufende Anfragen, Freigabefragen sowie das Aufräumen bei Abschaltung und Verbindungswechsel. Die Symbolgrafiken sind unverändert gegenüber dem mit Firefox geprüften Stand 1.0.4. Die folgenden Prüfstände bleiben als Verlauf erhalten.
+
+## Größere Aktivitätspunkte in Version 1.0.4
+
+Nach dem Praxistest wurde die Anzeige auf drei größere Punkte umgestellt. Ihr Durchmesser steigt bei einem 16-Pixel-Symbol von 1,5 auf rund 2,7 Pixel. Die Fußleiste ist höher und breiter; ein kräftig blauer Punkt wandert zwischen zwei blassblauen Punkten. Nach Abschluss bleiben drei kräftig blaue Punkte still sichtbar. Die Animations-, Frist- und Freigabelogik bleibt erhalten; die Animation durchläuft jetzt drei Bilder.
+
+Alle **47 gezielten Tests** für Aktivität, Freigabepopup und Einrichtungsstatus bestanden. Die Syntaxprüfung bestätigte **121 JavaScript-Dateien und das Manifest**. Ein getrenntes Headless-Profil mit **Firefox 157.0** bestätigte alle **10 Symbolvarianten** über die tatsächliche Symbolleisten-API. Die Darstellung in 16, 32 und 48 Pixeln wurde visuell geprüft; Belege liegen unter `work/activity-firefox-27444a91-3376-450f-9ee6-26f8a59cf314/`. Die folgenden Prüfstände bleiben als Verlauf erhalten.
+
+## Aktivitätsanzeige in Version 1.0.3
+
+Die Symbolleiste zeigt während laufender MCP-Anfragen vier von links nach rechts wechselnde blaue Punkte. Bildwechsel erfolgen höchstens alle 240 ms; schnelle Aufrufserien bleiben zusammenhängend, kurze Zugriffe mindestens 800 ms sichtbar. Nach längeren Zugriffen endet die Bewegung mit einem kurzen Nachlauf von 200 ms. Anschließend bleiben vier stillstehende Punkte während der bisherigen blauen Ein-Minuten-Anzeige sichtbar. Die historischen Farbstufen bleiben unverändert; ausstehende Freigaben pausieren die Bewegung zugunsten des „?“. Deaktivierung und Verbindungsabbruch räumen die Animation auf, spätere Abschlüsse alter Anfragen starten sie nicht erneut.
+
+Elf neue Tests prüfen Parallelität, Warteschlangen, Fehler, Freigabefragen, Verbindungswechsel, Deaktivierung, schnelle Serien, langsame Symbolwechsel sowie den Übergang von bewegten zu stillstehenden Punkten und zur orangefarbenen Rückschau. Sie verwenden die tatsächliche Farbstatusfunktion. Der vollständige Node-Lauf bestand mit **375 erfolgreichen Tests, 0 Fehlern und 2 bestehenden Skips** (377 insgesamt). Ein vorhandener PowerShell-Hilfetest überschritt bei gleichzeitigen Browser-/Lintläufen sein Zehn-Sekunden-Limit; der isolierte Lauf und der abschließende vollständige Lauf ohne diese Zusatzlast bestanden. Eine zuvor vorhandene UTF-8-BOM im Manifest wurde entfernt, damit die JSON-Prüfung funktioniert.
+
+`npm run test:firefox-activity` bestätigte mit **Firefox 157.0** in einem getrennten Headless-Profil die tatsächliche Anwendung aller **13 neuen SVG-Symbole** über `browserAction.setIcon` und deren Darstellung in 16, 32 und 48 Pixeln. Die Vorschau wurde visuell geprüft. Belege: `work/activity-firefox-28de0b80-ff9d-4b8b-a500-ab2e331ac551/`. Dieser Browsertest prüft die Symbol-API und Darstellung; den Ablauf der MCP-Anfragen prüfen die Hintergrundtests. Benutzerprofil und Native-Host-Registrierung wurden nicht verändert. Registrierungrevision und Protokollversion bleiben 1; eine erneute Registrierung ist für die Aktivitätsanzeige nicht erforderlich.
+
+Der lokale AMO-Linter meldet weiterhin **0 Fehler, 0 Hinweise und 3 bekannte Warnungen** zu den beiden Unix-Einrichtungsskripten und der Android-Mindestversion. Die folgenden Abschnitte dokumentieren frühere Prüfstände.
 
 ## Bereinigung der AMO-Warnungen
 

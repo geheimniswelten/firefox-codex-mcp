@@ -8,7 +8,7 @@ import { SERVER_INSTRUCTIONS, TOOL_DEFINITIONS } from './tools.mjs';
 import { saveExport } from './exports.mjs';
 
 export function createFirefoxServer({ bridge }) {
-  const server = new McpServer({ name: 'firefox-codex-mcp', version: '1.0.2' }, { instructions: SERVER_INSTRUCTIONS });
+  const server = new McpServer({ name: 'firefox-codex-mcp', version: '1.0.5' }, { instructions: SERVER_INSTRUCTIONS });
   for (const definition of TOOL_DEFINITIONS) {
     const { method, name, ...configuration } = definition;
     server.registerTool(name, configuration, async (params, context) => {

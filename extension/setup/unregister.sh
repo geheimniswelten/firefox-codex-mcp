@@ -1,5 +1,5 @@
 #!/bin/sh
-# Companion 1.0.2; registration revision 1.
+# Companion 1.0.5; registration revision 1.
 set -eu
 firefox_root=''
 firefox_no_clients=''

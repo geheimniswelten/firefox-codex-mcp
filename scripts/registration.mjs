@@ -10,7 +10,7 @@ export const HOST_NAME = 'de.codex.firefox_bridge';
 export const EXTENSION_ID = 'firefox-codex-mcp@local.invalid';
 export const REGISTRATION_REVISION = 1;
 export const REQUIRED_REGISTRATION_REVISION = Object.freeze({ win: 1, linux: 1, mac: 1 });
-export const INSTALLER_VERSION = '1.0.2';
+export const INSTALLER_VERSION = '1.0.5';
 const REGISTRY_PATH = `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${HOST_NAME}`;
 const exec = promisify(execFile);
 const failure = (code, message) => Object.assign(new Error(message), { code });

@@ -1,6 +1,6 @@
 {
   "name": "firefox-codex-mcp",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "private": true,
   "description": "Firefox WebExtension und lokaler MCP-Zugriff fuer Codex",
   "type": "module",
@@ -12,6 +12,7 @@
     "test": "node --test --test-concurrency=4 test/*.test.mjs",
     "check": "node scripts/check.mjs",
     "test:firefox-exports": "node scripts/test-exports-firefox.mjs",
+    "test:firefox-activity": "node scripts/test-activity-firefox.mjs",
     "test:firefox-tab-search": "node scripts/test-tab-search-firefox.mjs",
     "test:firefox-wait": "node scripts/test-wait-firefox.mjs",
     "test:firefox-history-bookmarks": "node scripts/test-history-bookmarks-firefox.mjs",

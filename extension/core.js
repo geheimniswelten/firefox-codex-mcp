@@ -1,7 +1,7 @@
 ﻿/* Shared as a plain background script and a side-effect module in Node tests. */
 (() => {
   "use strict";
-  const VERSION = "1.0.2";
+  const VERSION = "1.0.5";
   const SESSION_KEY = "firefox-codex-mcp.metadata.v1";
   const MAX_RESPONSE_BYTES = 800000; // Leave room for the native RPC envelope.
   const COLORS = ["blue", "cyan", "grey", "green", "orange", "pink", "purple", "red", "yellow"];
