@@ -240,6 +240,72 @@ export function mergeConfigText({ text, format = 'json', keys = ['mcpServers'], 
   }
 }
 
+// Discovery only supplies a candidate root. The existing exact ownership checks
+// still prove the complete entry before it may be removed or relocated.
+function discoverFirefoxRoot({ text, format, keys = ['mcpServers'] }) {
+  if (Buffer.byteLength(text) > MAX_BYTES) conflict('Konfiguration ist groesser als 4 MiB.');
+  let entry;
+  if (format === 'toml') {
+    if (/"""|'''/u.test(text)) conflict('Mehrzeilige TOML-Zeichenfolgen werden konservativ nicht automatisch bearbeitet.');
+    const begins = [...text.matchAll(/^# BEGIN firefox-codex-mcp sha256=([a-f0-9]{64}) prefix=([012])\r?\n/gmu)];
+    if (!begins.length && !text.includes('# BEGIN firefox-codex-mcp') && !text.includes('# END firefox-codex-mcp')) return null;
+    if (begins.length !== 1) conflict('Der verwaltete TOML-Block ist mehrdeutig oder veraendert.');
+    const body = text.slice(begins[0].index + begins[0][0].length, text.indexOf('# END firefox-codex-mcp', begins[0].index));
+    const command = /^command = (.+)\r?$/mu.exec(body)?.[1];
+    const args = /^args = (.+)\r?$/mu.exec(body)?.[1];
+    if (!command || !args) conflict('Der verwaltete TOML-Block ist unvollstaendig.');
+    entry = { command: JSON.parse(command), args: JSON.parse(args) };
+  } else {
+    let value;
+    if (format === 'yaml') value = yaml.load(text, { schema: yaml.JSON_SCHEMA }) ?? {};
+    else {
+      if (format === 'json' && text.replace(/^\uFEFF/u, '').trim()) JSON.parse(text.replace(/^\uFEFF/u, ''));
+      value = parseJson(text).value;
+    }
+    for (const key of keys) {
+      if (!object(value)) conflict('Der MCP-Bereich ist kein Objekt.');
+      if (!own(value, key)) return null;
+      value = value[key];
+    }
+    if (!object(value)) conflict('Der MCP-Bereich ist kein Objekt.');
+    if (!own(value, 'firefox')) return null;
+    entry = value.firefox;
+  }
+  if (!object(entry) || typeof entry.command !== 'string' || !isAbsolute(entry.command)
+      || !/^node(?:\.exe)?$/iu.test(basename(entry.command)) || !Array.isArray(entry.args)
+      || entry.args.length !== 3 || entry.args[1] !== '--config'
+      || [entry.command, entry.args[0], entry.args[2]].some(value => typeof value !== 'string' || !isAbsolute(value) || /[\u0000-\u001f\u007f]/u.test(value))) {
+    conflict('Der Firefox-Eintrag ist keiner unveraenderten Installation eindeutig zuzuordnen.');
+  }
+  const root = dirname(dirname(entry.args[0]));
+  if (entry.args[0] !== join(root, 'server', 'mcp.mjs') || entry.args[2] !== join(root, '.local', 'config.json')) {
+    conflict('Die Firefox-Startargumente gehoeren nicht zur selben bekannten Installation.');
+  }
+  return root;
+}
+
+export function relocateConfigText({ text, format = 'json', keys = ['mcpServers'], entry, discover = false, remove = false }) {
+  try {
+    if (discover && !remove) conflict('Client-Erkennung ist nur bei der Deregistrierung moeglich.');
+    if (!remove) {
+      const current = mergeConfigText({ text, format, keys, entry });
+      if (current.status !== 'conflict') return current;
+    }
+    const previousRoot = discoverFirefoxRoot({ text, format, keys });
+    if (!previousRoot) return remove
+      ? { status: 'unchanged', text, message: 'Kein unveraenderter eigener Eintrag zu entfernen.' }
+      : mergeConfigText({ text, format, keys, entry });
+    const previous = { ...entry, args: [join(previousRoot, 'server', 'mcp.mjs'), '--config', join(previousRoot, '.local', 'config.json')] };
+    const removed = mergeConfigText({ text, format, keys, entry: previous, remove: true });
+    if (removed.status !== 'removed' || remove) return removed;
+    const added = mergeConfigText({ text: removed.text, format, keys, entry });
+    if (added.status !== 'configured') return { ...added, text };
+    return { ...added, message: 'Eigener Firefox-Eintrag auf den aktuellen Installationspfad umgestellt.' };
+  } catch (error) {
+    return { status: 'conflict', text, message: error instanceof Conflict ? error.message : 'Konfiguration ist ungueltig oder verwendet nicht unterstuetzte Syntax; unveraendert.' };
+  }
+}
+
 async function exists(path) {
   try { await lstat(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
 }
@@ -372,7 +438,8 @@ async function writeAtomic(path, before, content) {
   }
 }
 
-export async function configureClients({ root, nodePath = process.execPath, home = homedir(), appData, localAppData, env = process.env, platform = process.platform, remove = false, dryRun = false }) {
+export async function configureClients({ root, nodePath = process.execPath, home = homedir(), appData, localAppData, env = process.env, platform = process.platform, remove = false, dryRun = false, relocate = false, discover = false }) {
+  if ((discover && !remove) || (relocate && remove) || (relocate && discover)) conflict('Client-Pfadwechsel und Erkennung sind nicht mit dieser Operation kombinierbar.');
   root = absoluteEnv(root, 'root');
   nodePath = absoluteEnv(nodePath, 'nodePath');
   const base = { command: nodePath, args: [join(root, 'server', 'mcp.mjs'), '--config', join(root, '.local', 'config.json')] };
@@ -385,7 +452,8 @@ export async function configureClients({ root, nodePath = process.execPath, home
       const before = await snapshot(candidate.path);
       const text = before.bytes?.toString('utf8') ?? '';
       if (before.bytes && !Buffer.from(text, 'utf8').equals(before.bytes)) conflict('Datei ist nicht gueltiges UTF-8.');
-      const merged = mergeConfigText({ text, format: candidate.format, keys: candidate.keys, entry: { ...base, ...candidate.extra }, remove });
+      const merge = relocate || discover ? relocateConfigText : mergeConfigText;
+      const merged = merge({ text, format: candidate.format, keys: candidate.keys, entry: { ...base, ...candidate.extra }, remove, discover });
       if (!['configured', 'removed'].includes(merged.status)) { results.push({ ...result, status: merged.status, message: merged.message }); continue; }
       if (dryRun) { results.push({ ...result, status: 'dry_run', message: remove ? 'Eigener Eintrag wuerde entfernt.' : 'Firefox-Eintrag wuerde ergaenzt.' }); continue; }
       const backup = await writeAtomic(candidate.path, before, merged.text);

@@ -10,7 +10,7 @@ const [html, source, manifestText] = await Promise.all([
   readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'),
 ]);
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
-function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
+function deferred() { let resolve, reject; const promise = new Promise((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; }
 function event() {
   const listeners = new Set();
   return { addListener: fn => listeners.add(fn), removeListener: fn => listeners.delete(fn), emit: (...args) => [...listeners].map(fn => fn(...args)), size: () => listeners.size };
@@ -21,44 +21,52 @@ function state(platform = 'linux') {
     hostVersion: '1.0.2', registration: { registrationRevision: 1, installerVersion: '1.0.2', registeredAt: '2026-10-01T12:00:00.000Z', platform, manifestPath: '/example/manifest.json' }, lastConfirmation: null,
   } };
 }
-async function mount(initial = state(), clipboard) {
+async function mount(initial = state(), clipboard, download = async () => 1) {
   const window = new Window({ url: 'moz-extension://bridge/setup/setup.html', settings: { enableJavaScriptEvaluation: false, disableCSSFileLoading: true, disableJavaScriptFileLoading: true } });
   window.document.write(html);
-  const messages = [], responses = [];
+  const messages = [], responses = [], downloads = [];
   let current = structuredClone(initial), interval, cleared = false;
-  const browser = { runtime: {
+  const browser = { downloads: { async download(options) { downloads.push(structuredClone(options)); return download(options); } }, runtime: {
     getURL: file => `moz-extension://bridge/${file}`, onMessage: event(),
     async sendMessage(message) { messages.push(structuredClone(message)); return structuredClone(responses.length ? await responses.shift() : current); },
   } };
   vm.runInContext(source, vm.createContext({ browser, window, document: window.document, navigator: { clipboard }, setInterval: fn => { interval = fn; return 1; }, clearInterval() { cleared = true; } }));
   await settle();
   return {
-    window, browser, messages, el: id => window.document.getElementById(id),
+    window, browser, messages, downloads, el: id => window.document.getElementById(id),
     setState(value) { current = structuredClone(value); }, queueResponse(value) { responses.push(value); }, refresh() { return interval(); },
     select(platform) { const select = window.document.getElementById('platform'); select.value = platform; select.dispatchEvent(new window.Event('change')); },
     close() { window.dispatchEvent(new window.Event('unload')); }, cleared: () => cleared,
   };
 }
 
-test('options page opens in its own tab without browser styles or new download/clipboard permissions', () => {
+test('options page requests the download API permission and opens in its own tab without clipboard permissions', () => {
   const manifest = JSON.parse(manifestText);
   assert.deepEqual(manifest.options_ui, { page: 'setup/setup.html', open_in_tab: true, browser_style: false });
-  assert.equal(manifest.permissions.includes('downloads'), false);
+  assert.equal(manifest.permissions.includes('downloads'), true);
+  assert.equal(manifest.permissions.includes('downloads.open'), false);
   assert.equal(manifest.permissions.includes('clipboardRead'), false);
   assert.equal(manifest.permissions.includes('clipboardWrite'), false);
   assert.equal(manifest.name, 'Codex MCP for Firefox');
 });
 
-test('all platform downloads point directly to packaged scripts and name the required runtime', async () => {
+test('all platforms download packaged scripts only after clicking and open a save dialog with the right filename', async () => {
   for (const platform of ['win', 'linux', 'mac']) {
     const f = await mount(state(platform));
     assert.equal(f.el('platform').value, platform);
     const extension = platform === 'win' ? 'ps1' : 'sh';
+    await f.refresh();
+    assert.deepEqual(f.downloads, [], 'loading and status refresh must not start downloads');
     for (const [id, script] of [['registerDownload', 'register'], ['unregisterDownload', 'unregister']]) {
-      assert.equal(f.el(id).href, `moz-extension://bridge/setup/${script}.${extension}`);
-      assert.equal(f.el(id).download, `${script}.${extension}`);
+      assert.equal(f.el(id).tagName, 'BUTTON');
+      assert.equal(f.el(id).disabled, false);
       assert.equal(f.el(id).getAttribute('aria-disabled'), 'false');
+      f.el(id).click(); await settle();
+      assert.deepEqual(f.downloads.at(-1), { url: `moz-extension://bridge/setup/${script}.${extension}`, filename: `${script}.${extension}`, saveAs: true });
+      assert.match(f.el('downloadStatus').textContent, new RegExp(`Download für ${script}\\.${extension} gestartet`, 'u'));
+      assert.equal(f.el(id).disabled, false);
     }
+    assert.equal(f.downloads.length, 2);
     assert.match(f.el('platformNote').textContent, platform === 'win' ? /Node.*automatisch/u : /Node\.js 22.*sh register\.sh/u);
     assert.equal(f.el('windowsInstructions').hidden, platform !== 'win');
     assert.equal(f.el('commandInstructions').hidden, false);
@@ -67,25 +75,68 @@ test('all platform downloads point directly to packaged scripts and name the req
       assert.equal(f.el(id).value, platform === 'win'
         ? 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\' + script + '.ps1' : 'sh ' + script + '.sh');
     }
-    assert.deepEqual(f.messages, [{ type: 'bridge_status' }]);
+    assert.deepEqual(f.messages, [{ type: 'bridge_status' }, { type: 'bridge_status' }]);
     f.close();
   }
 });
 
 test('unknown platform needs an explicit choice and manual selection survives status refresh', async () => {
   const f = await mount(state(null));
-  assert.equal(f.el('registerDownload').hasAttribute('href'), false);
+  assert.equal(f.el('registerDownload').disabled, true);
   assert.equal(f.el('registerDownload').getAttribute('aria-disabled'), 'true');
+  f.el('registerDownload').click(); await settle();
+  assert.deepEqual(f.downloads, []);
   assert.equal(f.el('commandInstructions').hidden, true);
   f.select('mac');
-  assert.equal(f.el('registerDownload').download, 'register.sh');
+  assert.equal(f.el('registerDownload').disabled, false);
   f.setState(state('win')); await f.refresh();
   assert.equal(f.el('platform').value, 'mac');
-  assert.match(f.el('registerDownload').href, /register\.sh$/u);
-  f.select(''); assert.equal(f.el('registerDownload').hasAttribute('href'), false);
+  f.el('registerDownload').click(); await settle();
+  assert.equal(f.downloads[0].filename, 'register.sh');
+  f.select(''); assert.equal(f.el('registerDownload').disabled, true);
   assert.equal(f.el('commandInstructions').hidden, true);
   assert.equal(f.el('registerCommand').value, '');
   f.close();
+});
+
+test('pending save dialogs reject duplicate clicks and status refresh preserves the busy controls', async () => {
+  const pending = deferred(), f = await mount(state('win'), undefined, () => pending.promise);
+  f.el('registerDownload').click();
+  f.el('registerDownload').click(); f.el('unregisterDownload').click();
+  await f.refresh();
+  for (const id of ['registerDownload', 'unregisterDownload']) {
+    assert.equal(f.el(id).disabled, true);
+    assert.equal(f.el(id).getAttribute('aria-disabled'), 'true');
+  }
+  assert.equal(f.downloads.length, 1);
+  assert.match(f.el('downloadStatus').textContent, /Speicherdialog.*register\.ps1/u);
+  f.select('mac');
+  pending.resolve(42); await settle();
+  assert.match(f.el('downloadStatus').textContent, /Download für register\.ps1 gestartet/u);
+  assert.equal(f.el('registerDownload').disabled, false);
+  f.el('unregisterDownload').click(); await settle();
+  assert.equal(f.downloads[1].filename, 'unregister.sh');
+  f.close();
+});
+
+test('download rejection is shown literally and both controls recover for retry', async () => {
+  for (const id of ['registerDownload', 'unregisterDownload']) {
+    const pending = deferred(); let calls = 0;
+    const f = await mount(state('win'), undefined, () => ++calls === 1 ? pending.promise : 99);
+    f.el(id).click();
+    pending.reject(new Error('<img src=x onerror=alert(1)>')); await settle();
+    assert.match(f.el('downloadStatus').textContent, /konnte nicht gespeichert werden.*<img/u);
+    assert.equal(f.el('downloadStatus').className, 'error');
+    assert.equal(f.window.document.querySelectorAll('img').length, 1);
+    for (const downloadId of ['registerDownload', 'unregisterDownload']) assert.equal(f.el(downloadId).disabled, false);
+    await f.refresh();
+    assert.match(f.el('downloadStatus').textContent, /konnte nicht gespeichert werden/u);
+    f.el(id).click(); await settle();
+    assert.equal(f.downloads.length, 2);
+    assert.match(f.el('downloadStatus').textContent, /Download.*gestartet/u);
+    assert.equal(f.el('downloadStatus').className, 'note');
+    f.close();
+  }
 });
 
 test('copy buttons write only the chosen command after a click on all supported platforms', async () => {
@@ -185,4 +236,37 @@ test('host-controlled versions, paths and errors render literally without insert
   assert.equal(f.el('error').textContent, injected);
   assert.equal(f.window.document.querySelectorAll('img').length, 1, 'only the packaged header icon may be present');
   f.close();
+});
+
+test('status polling and pushes preserve selected setup text while other status fields keep updating', async t => {
+  const value = state('win'); value.lastError = 'No such native application de.codex.firefox_bridge';
+  value.setup.lastConfirmation = { ...structuredClone(value.setup), verifiedAt: '2026-10-02T12:00:00.000Z' };
+  const f = await mount(value); t.after(() => f.close());
+  const selection = f.window.getSelection();
+  for (const id of ['statusTitle', 'statusDescription', 'connection', 'addonVersion', 'hostVersion', 'requiredRevision', 'currentRevision', 'installerVersion', 'registeredAt', 'lastConfirmed', 'manifestPath', 'error', 'registerDownload', 'commandIntro', 'platformNote']) {
+    const node = f.el(id).firstChild, range = f.window.document.createRange();
+    assert.ok(node?.textContent, `${id} should contain selectable text`);
+    range.setStart(node, 0); range.setEnd(node, Math.min(12, node.textContent.length));
+    selection.removeAllRanges(); selection.addRange(range);
+    const selected = selection.toString();
+    await f.refresh(); f.browser.runtime.onMessage.emit({ type: 'bridge_status_changed' }); await settle();
+    assert.equal(f.el(id).firstChild, node, `${id}: unchanged polling must keep the selected text node`);
+    assert.equal(range.startContainer, node);
+    assert.equal(range.endContainer, node);
+    assert.equal(selection.toString(), selected);
+  }
+  const node = f.el('manifestPath').firstChild, range = f.window.document.createRange();
+  range.selectNodeContents(node); selection.removeAllRanges(); selection.addRange(range);
+  const selected = selection.toString(), changed = structuredClone(value);
+  changed.connected = false; changed.setup.status = 'update_required'; changed.setup.label = 'Aktualisierung erforderlich';
+  f.setState(changed); await f.refresh();
+  assert.equal(f.el('statusTitle').textContent, changed.setup.label);
+  assert.match(f.el('connection').textContent, /derzeit nicht verfügbar/u);
+  assert.equal(f.el('registerDownload').textContent, 'Aktualisierungsskript speichern');
+  assert.equal(f.el('manifestPath').firstChild, node);
+  assert.equal(selection.toString(), selected, 'changes elsewhere must not clear selected manifest text');
+  changed.lastError = 'Neue Verbindungsdiagnose'; changed.setup.registration.manifestPath = 'C:\\Tools\\manifest.json';
+  f.setState(changed); await f.refresh();
+  assert.equal(f.el('error').textContent, changed.lastError);
+  assert.equal(f.el('manifestPath').textContent, changed.setup.registration.manifestPath);
 });

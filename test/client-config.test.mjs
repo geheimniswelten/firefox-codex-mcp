@@ -5,7 +5,8 @@ import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import yaml from 'js-yaml';
-import { mergeConfigText, detectClients, configureClients } from '../scripts/client-config.mjs';
+import { mergeConfigText, relocateConfigText, detectClients, configureClients } from '../scripts/client-config.mjs';
+import { main as clientMain } from '../scripts/configure-clients.mjs';
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fixtureBase = join(project, 'work', 'client-config-tests');
@@ -370,4 +371,89 @@ test('read-only and invalid UTF-8 files are preserved with per-client diagnostic
   await chmod(path, 0o444);
   try { assert.equal((await configureClients({ ...options, dryRun: true })).find(c => c.id === 'lm-studio').status, 'conflict'); }
   finally { await chmod(path, 0o600); }
+});
+
+test('relocation and discovered removal prove old ownership even when the previous installation is absent', () => {
+  const previousRoot = join(root, 'missing previous installation');
+  const previousEntry = { ...entry, command: join(previousRoot, '.runtime', 'node', 'node.exe'), args: [join(previousRoot, 'server', 'mcp.mjs'), '--config', join(previousRoot, '.local', 'config.json')] };
+  for (const format of ['json', 'json5', 'toml', 'yaml']) {
+    const keys = format === 'yaml' ? ['mcp_servers'] : ['mcpServers'];
+    const extras = format === 'yaml' ? { timeout: 180 } : {};
+    const current = { ...entry, ...extras }, previous = { ...previousEntry, ...extras };
+    const original = format === 'toml' ? '# preserve settings\nmodel = "example"\n' : format === 'yaml' ? '# preserve settings\nmodel: example\n' : '{"private":"KEEP_FIXTURE_PRIVATE","other":17}';
+    const configured = mergeConfigText({ text: original, format, keys, entry: previous });
+    assert.equal(configured.status, 'configured', configured.message);
+    const migrated = relocateConfigText({ text: configured.text, format, keys, entry: current });
+    assert.equal(migrated.status, 'configured', `${format}: ${migrated.message}`);
+    assert.equal(mergeConfigText({ text: migrated.text, format, keys, entry: current }).status, 'unchanged');
+    assert.equal(relocateConfigText({ text: migrated.text, format, keys, entry: current }).status, 'unchanged');
+    const removed = relocateConfigText({ text: configured.text, format, keys, entry: current, remove: true, discover: true });
+    assert.equal(removed.status, 'removed', `${format}: ${removed.message}`);
+    if (format === 'toml') assert.equal(removed.text, original);
+    else if (format === 'yaml') { assert.ok(removed.text.startsWith(original)); assert.equal(yaml.load(removed.text).mcp_servers, null); }
+    else assert.equal(JSON.parse(removed.text).private, 'KEEP_FIXTURE_PRIVATE');
+  }
+});
+
+test('relocation and discovery preserve foreign, modified or ambiguous Firefox entries', () => {
+  const previousRoot = join(root, 'old installation');
+  const previousEntry = { ...entry, args: [join(previousRoot, 'server', 'mcp.mjs'), '--config', join(previousRoot, '.local', 'config.json')] };
+  for (const changed of [
+    { ...previousEntry, disabled: true },
+    { ...previousEntry, command: 'node' },
+    { ...previousEntry, args: [previousEntry.args[0], '--config', entry.args[2]] },
+    { ...previousEntry, args: [...previousEntry.args, '--extra'] },
+    { ...previousEntry, args: [join(previousRoot, 'custom', 'mcp.mjs'), '--config', previousEntry.args[2]] },
+  ]) {
+    const text = JSON.stringify({ mcpServers: { firefox: changed }, private: 'DO_NOT_PRINT_FIXTURE' });
+    for (const options of [{}, { remove: true, discover: true }]) {
+      const result = relocateConfigText({ text, entry, ...options });
+      assert.equal(result.status, 'conflict', result.message);
+      assert.equal(result.text, text);
+      assert.ok(!result.message.includes('DO_NOT_PRINT_FIXTURE'));
+    }
+  }
+  const marked = mergeConfigText({ text: '', format: 'toml', entry: previousEntry }).text;
+  for (const text of [marked.replace('tool_timeout_sec = 180', 'tool_timeout_sec = 181'), marked.replace(/sha256=[a-f0-9]{64}/u, `sha256=${'0'.repeat(64)}`), marked.replace('# END firefox-codex-mcp', '# END altered')]) {
+    for (const options of [{}, { remove: true, discover: true }]) {
+      const result = relocateConfigText({ text, format: 'toml', entry, ...options });
+      assert.equal(result.status, 'conflict', result.message);
+      assert.equal(result.text, text);
+    }
+  }
+  const manual = `[mcp_servers.firefox]\ncommand = ${JSON.stringify(previousEntry.command)}\nargs = ${JSON.stringify(previousEntry.args)}\n`;
+  assert.equal(relocateConfigText({ text: manual, format: 'toml', entry }).status, 'conflict');
+  assert.equal(relocateConfigText({ text: manual, format: 'toml', entry, remove: true, discover: true }).text, manual);
+});
+
+test('actual relocation writes one backup of the original and discovered uninstall works without registry or old root', async t => {
+  const options = await fixture(t);
+  const previousRoot = join(options.home, 'deleted installation');
+  const previousEntry = { command: join(previousRoot, '.runtime', 'node', 'node.exe'), args: [join(previousRoot, 'server', 'mcp.mjs'), '--config', join(previousRoot, '.local', 'config.json')] };
+  const folder = join(options.home, '.lmstudio'), path = join(folder, 'mcp.json');
+  await mkdir(folder);
+  const source = JSON.stringify({ private: 'KEEP_PRIVATE_FIXTURE', mcpServers: { firefox: previousEntry, weather: { command: 'other' } } });
+  await writeFile(path, source);
+  assert.equal((await configureClients(options)).find(c => c.id === 'lm-studio').status, 'conflict');
+  assert.equal((await configureClients({ ...options, relocate: true, dryRun: true })).find(c => c.id === 'lm-studio').status, 'dry_run');
+  assert.deepEqual(await readdir(folder), ['mcp.json']);
+  assert.equal(await readFile(path, 'utf8'), source);
+  const result = (await configureClients({ ...options, relocate: true })).find(c => c.id === 'lm-studio');
+  assert.equal(result.status, 'configured', result.message);
+  assert.equal(await readFile(result.backup, 'utf8'), source);
+  assert.equal((await readdir(folder)).filter(name => name.endsWith('.bak')).length, 1);
+  const migrated = JSON.parse(await readFile(path, 'utf8'));
+  assert.deepEqual(migrated.mcpServers.firefox, entry);
+  assert.equal(migrated.private, 'KEEP_PRIVATE_FIXTURE');
+  assert.equal((await configureClients({ ...options, root: previousRoot, remove: true, discover: true })).find(c => c.id === 'lm-studio').status, 'removed');
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')).mcpServers, { weather: { command: 'other' } });
+});
+
+test('client CLI and API reject conflicting relocation/discovery operations before reading any configuration', async () => {
+  for (const options of [{ discover: true }, { remove: true, relocate: true }, { discover: true, relocate: true, remove: true }]) {
+    await assert.rejects(configureClients({ root, ...options }));
+  }
+  for (const args of [['--discover'], ['--remove', '--relocate'], ['--remove', '--discover', '--relocate']]) {
+    await assert.rejects(clientMain(['--root', root, ...args]));
+  }
 });

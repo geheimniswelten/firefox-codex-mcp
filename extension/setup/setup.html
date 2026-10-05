@@ -16,7 +16,7 @@
         <p id="connection" class="note"></p>
         <p id="error" class="error" role="alert" hidden></p>
         <dl>
-          <dt>Erweiterungsversion</dt><dd id="addonVersion">1.0.5</dd>
+          <dt>Erweiterungsversion</dt><dd id="addonVersion">1.0.6</dd>
           <dt>Serverversion</dt><dd id="hostVersion">Noch nicht bestätigt</dd>
           <dt>Benötigte Registrierungsrevision</dt><dd id="requiredRevision">1</dd>
           <dt>Aktuelle Registrierungsrevision</dt><dd id="currentRevision">Noch nicht bestätigt</dd>
@@ -32,7 +32,8 @@
         <label for="platform">Betriebssystem</label>
         <select id="platform"><option value="">Bitte auswählen</option><option value="win">Windows</option><option value="linux">Linux</option><option value="mac">macOS</option></select>
         <p id="platformNote" class="note">Wähle das Betriebssystem, auf dem Firefox und der lokale Server laufen.</p>
-        <div class="downloads"><a id="registerDownload" class="button" aria-disabled="true">Registrierungsskript speichern</a><a id="unregisterDownload" class="button secondary" aria-disabled="true">Deregistrierungsskript speichern</a></div>
+        <div class="downloads"><button id="registerDownload" type="button" disabled aria-disabled="true">Registrierungsskript speichern</button><button id="unregisterDownload" type="button" class="secondary" disabled aria-disabled="true">Deregistrierungsskript speichern</button></div>
+        <p id="downloadStatus" class="note" role="status" aria-live="polite"></p>
         <div id="commandInstructions" hidden>
           <p id="commandIntro">Öffne ein Terminal im Ordner der gespeicherten Skripte.</p>
           <label for="registerCommand">Registrieren oder aktualisieren:</label>

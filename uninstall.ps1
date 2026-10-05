@@ -17,6 +17,22 @@ function Test-FirefoxBridgePathEqual {
     return $null -ne $a -and $null -ne $b -and [string]::Equals($a, $b, [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Test-FirefoxBridgeRegistrationStatusOwnership {
+    param([string]$Path, [string]$Manifest)
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or $item.LinkType -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 65536) { return $false }
+        $status = [IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop
+        if (($status.schemaVersion -isnot [long] -and $status.schemaVersion -isnot [int]) -or $status.schemaVersion -ne 1 -or ($status.registrationRevision -isnot [long] -and $status.registrationRevision -isnot [int])) { return $false }
+        if ($status.registrationRevision -lt 1 -or $status.registrationRevision -gt 9007199254740991 -or $status.installerVersion -isnot [string] -or $status.installerVersion -notmatch '^\d+\.\d+\.\d+$' -or $status.platform -isnot [string] -or $status.platform -cne 'win') { return $false }
+        if ($status.registeredAt -isnot [string] -or $status.registeredAt -notmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$') { return $false }
+        $timestamp = [datetime]::ParseExact($status.registeredAt, "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
+        if ($status.manifestPath -isnot [string] -or -not (Test-FirefoxBridgePathEqual $status.manifestPath $Manifest)) { return $false }
+        if ($status.PSObject.Properties.Name -contains 'registrationPath' -and ($status.registrationPath -isnot [string] -or $status.registrationPath -cne 'HKCU\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge')) { return $false }
+        return $true
+    } catch { return $false }
+}
+
 function Get-FirefoxBridgeLocalFiles {
     param([string]$ProjectPath = $PSScriptRoot)
     # The registered installation may differ from this freshly downloaded copy.
@@ -42,6 +58,8 @@ function Get-FirefoxBridgeLocalFiles {
         }
         $paths += $path
     }
+    $receiptPath = [IO.Path]::Combine($localPath, 'registration-status.json')
+    if (Test-FirefoxBridgeRegistrationStatusOwnership -Path $receiptPath -Manifest $paths[3]) { $paths += $receiptPath }
     return [pscustomobject]@{ Project = $projectPath; Directory = $localPath; Files = $paths; Config = $paths[0]; Manifest = $paths[3] }
 }
 
@@ -202,7 +220,7 @@ function Remove-FirefoxBridgeClientRegistrations {
         Write-Warning 'KI-Client-Eintraege bleiben erhalten: Node 22+ oder die Parserpakete fehlen. Native-Host-Deinstallation wird fortgesetzt. Zugehoerigen Firefox-MCP-Eintrag in den KI-Apps manuell entfernen (siehe README.md).'
         return
     }
-    $arguments = @($scriptPath, '--remove', '--root', $ProjectPath)
+    $arguments = @($scriptPath, '--remove', '--discover', '--root', $ProjectPath)
     if ($Preview) { $arguments += '--dry-run' }
     try {
         & $nodePath @arguments
@@ -247,22 +265,25 @@ function Invoke-FirefoxBridgeUninstall {
     foreach ($snapshot in $owned) {
         if ($PSCmdlet.ShouldProcess("Bridge-Prozess PID $($snapshot.ProcessId)", 'Nur diesen Projektprozess beenden')) { Stop-FirefoxBridgeProcess $snapshot }
     }
-    if ($paths) {
-        try {
-            if ($WhatIfPreference) {
-                Remove-FirefoxBridgeClientRegistrations -ProjectPath $paths.Project -Preview
-            } elseif ($PSCmdlet.ShouldProcess($paths.Project, 'Zugehoerige Firefox-MCP-Eintraege aus erkannten KI-Clients entfernen')) {
-                Remove-FirefoxBridgeClientRegistrations -ProjectPath $paths.Project
-            }
-        } catch {
-            Write-Warning 'Die optionale KI-Client-Bereinigung ist nicht verfuegbar. Native-Host-Deinstallation wird fortgesetzt; passende Eintraege manuell pruefen.'
+    $clientProject = if ($paths) { $paths.Project } else { $PSScriptRoot }
+    try {
+        if ($WhatIfPreference) {
+            Remove-FirefoxBridgeClientRegistrations -ProjectPath $clientProject -Preview
+        } elseif ($PSCmdlet.ShouldProcess('Eigene Firefox-MCP-Eintraege in erkannten KI-Clients', 'Installationspfad erkennen und zugehoerige Eintraege entfernen')) {
+            Remove-FirefoxBridgeClientRegistrations -ProjectPath $clientProject
         }
+    } catch {
+        Write-Warning 'Die optionale KI-Client-Bereinigung ist nicht verfuegbar. Native-Host-Deinstallation wird fortgesetzt; passende Eintraege manuell pruefen.'
+    }
+    if ($paths) {
         foreach ($file in $paths.Files) {
             # Revalidate links immediately before each deletion; never recurse.
             $null = Get-FirefoxBridgeLocalFiles -ProjectPath $paths.Project
             if (Test-Path -LiteralPath $file -PathType Leaf) {
+                if ([IO.Path]::GetFileName($file) -ieq 'registration-status.json' -and -not (Test-FirefoxBridgeRegistrationStatusOwnership -Path $file -Manifest $paths.Manifest)) { continue }
                 if ($PSCmdlet.ShouldProcess($file, 'Erzeugte lokale Datei entfernen')) {
                     $null = Get-FirefoxBridgeLocalFiles -ProjectPath $paths.Project
+                    if ([IO.Path]::GetFileName($file) -ieq 'registration-status.json' -and -not (Test-FirefoxBridgeRegistrationStatusOwnership -Path $file -Manifest $paths.Manifest)) { continue }
                     Remove-Item -LiteralPath $file -Force
                 }
             }

@@ -56,11 +56,12 @@ test('Port, TOML-Literal und fremde Registrierung werden geprüft', async () => 
   assert.throws(() => assertRegistrationCompatible(null, '/project/host.json'), /gültigen Manifestpfad/u);
 });
 
-function registryAdapter() {
-  let value;
+function registryAdapter(initialValue) {
+  let value = initialValue;
   return {
-    async read() { return value === undefined ? { exists: false } : { exists: true, value }; },
+    async read() { return value === undefined ? { exists: false, hasChildren: false, hasExtraValues: false } : { exists: true, value, hasChildren: false, hasExtraValues: false }; },
     async write(path) { value = path; },
+    async replace(expected, path) { assert.equal(value, expected); value = path; },
     async remove(path) { assert.equal(value, path); value = undefined; }
   };
 }
@@ -124,8 +125,41 @@ test('native deregistration previews and removes its receipt without deleting ge
 test('CLI rejects conflicting native operations and unsupported dry-run before doing setup work', async t => {
   const root = await mkdtemp(join(tmpdir(), 'firefox-mcp-cli-registration-'));
   t.after(() => cleanupTemporaryRoot(root));
-  for (const args of [['--register-native', '--unregister-native'], ['--unregister-native', '--port', '38477'], ['--dry-run']]) {
+  for (const args of [['--register-native', '--unregister-native'], ['--unregister-native', '--port', '38477'], ['--dry-run'], ['--replace-native-manifest'], ['--replace-native-manifest', 'relative'], ['--replace-native-manifest', join(root, 'old.json')], ['--unregister-native', '--replace-native-manifest', join(root, 'old.json')]]) {
     await assert.rejects(main(['--root', root, ...args]));
     await assert.rejects(readFile(join(root, '.local', 'config.json')), { code: 'ENOENT' });
   }
+});
+
+test('reinstallation from a new path repairs a missing old installation and records a backup before confirmation', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'firefox-mcp-relocated-setup-'));
+  t.after(() => cleanupTemporaryRoot(root));
+  const oldManifest = join(root, 'deleted installation', '.local', `${HOST_NAME}.json`);
+  const adapter = registryAdapter(oldManifest);
+  const prepared = await prepareSetup({ root, register: true, platform: 'win', registryAdapter: adapter });
+  assert.equal((await adapter.read()).value, prepared.manifestPath);
+  assert.equal(prepared.previousManifestPath, oldManifest);
+  assert.ok(prepared.registrationBackupPath);
+  const backup = JSON.parse(await readFile(prepared.registrationBackupPath, 'utf8'));
+  assert.equal(backup.previousManifestPath, oldManifest);
+  assert.equal((await readRegistrationStatus(prepared.configPath)).manifestPath, prepared.manifestPath);
+  const repeat = await prepareSetup({ root, register: true, platform: 'win', registryAdapter: adapter });
+  assert.equal(repeat.registrationBackupPath, null);
+});
+
+test('deregistration from another copy uses the registered installation and removes its receipt only', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'firefox-mcp-relocated-unregister-'));
+  t.after(() => cleanupTemporaryRoot(root));
+  const adapter = registryAdapter();
+  const old = await prepareSetup({ root: join(root, 'old'), register: true, platform: 'win', registryAdapter: adapter });
+  const fresh = await prepareSetup({ root: join(root, 'fresh') });
+  const preview = await unregisterSetup({ root: join(root, 'fresh'), platform: 'win', registryAdapter: adapter, dryRun: true });
+  assert.equal(preview.manifestPath, old.manifestPath);
+  assert.ok(await readRegistrationStatus(old.configPath));
+  const removed = await unregisterSetup({ root: join(root, 'fresh'), platform: 'win', registryAdapter: adapter });
+  assert.equal(removed.configPath, old.configPath);
+  assert.equal(await readRegistrationStatus(old.configPath), null);
+  assert.equal((await adapter.read()).exists, false);
+  assert.ok(await readFile(fresh.manifestPath, 'utf8'));
+  assert.ok(await readFile(old.configPath, 'utf8'));
 });

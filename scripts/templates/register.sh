@@ -31,10 +31,6 @@ fi
 case "$firefox_root" in /*) ;; *) echo '--root needs an absolute directory.' >&2; exit 1 ;; esac
 firefox_root=$(node -e 'process.stdout.write(require("node:path").resolve(process.argv[1]))' "$firefox_root")
 if [ -n "$firefox_installed" ]; then firefox_installed=$(node -e 'process.stdout.write(require("node:path").resolve(process.argv[1]))' "$firefox_installed"); fi
-if [ -n "$firefox_installed" ] && [ "$firefox_root" != "$firefox_installed" ]; then
-  echo "A companion is already registered in $firefox_installed. Select that directory or deregister it first." >&2
-  exit 1
-fi
 node --input-type=module - "$firefox_root" "$firefox_no_clients" "$firefox_port" <<'FIREFOX_COMPANION_JS'
 __PAYLOAD_MODULE__
 const payload = decodePayload('__PAYLOAD__', '__PAYLOAD_SHA__');

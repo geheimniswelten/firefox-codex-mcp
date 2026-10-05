@@ -68,8 +68,6 @@ if ($Help) {
 }
 try {
     $root = Get-FirefoxSetupRoot -RequestedRoot $ProjectRoot
-    $installedRoot = Get-FirefoxInstalledRoot
-    if ($installedRoot -and -not [string]::Equals($root, [IO.Path]::GetFullPath($installedRoot), [StringComparison]::OrdinalIgnoreCase)) { throw ('A companion is already registered in ' + $installedRoot + '. Select that directory to update it, or deregister it first.') }
     Expand-FirefoxSetupPayload -Root $root
     $arguments = @{ NoOpenFirefox = $true }
     if ($NoDownload) { $arguments.NoDownload = $true }

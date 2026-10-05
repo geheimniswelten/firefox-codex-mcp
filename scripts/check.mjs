@@ -26,7 +26,7 @@ try {
   if (![2, 3].includes(manifest.manifest_version)) throw new Error('Ungültige Manifestversion.');
   if (manifest.browser_specific_settings?.gecko?.id !== 'firefox-codex-mcp@local.invalid') throw new Error('Die Erweiterungs-ID passt nicht zum Native Host.');
   if (parseFloat(manifest.browser_specific_settings.gecko.strict_min_version) < 139) throw new Error('Tabgruppen benötigen Firefox 139 oder neuer.');
-  for (const permission of ['tabs', 'tabGroups', 'nativeMessaging', 'sessions', 'management', 'history', 'bookmarks']) {
+  for (const permission of ['tabs', 'tabGroups', 'nativeMessaging', 'sessions', 'management', 'history', 'bookmarks', 'downloads']) {
     if (!manifest.permissions?.includes(permission)) throw new Error(`Berechtigung fehlt: ${permission}`);
   }
   for (const category of ['browsingActivity', 'websiteContent', 'bookmarksInfo']) {

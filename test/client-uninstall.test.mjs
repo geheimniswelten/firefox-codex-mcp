@@ -98,9 +98,9 @@ if ($script:removals -ne 1 -or $script:registration.Exists) { throw 'Registered 
   const oldRoot = await realpath(old);
   const currentRoot = await realpath(current);
   assert.deepEqual(await records(), [
-    { event: 'clients', script: join(currentRoot, 'scripts', 'configure-clients.mjs'), node: join(oldRoot, '.runtime', 'node', 'node.exe'), args: ['--remove', '--root', oldRoot, '--dry-run'] },
+    { event: 'clients', script: join(currentRoot, 'scripts', 'configure-clients.mjs'), node: join(oldRoot, '.runtime', 'node', 'node.exe'), args: ['--remove', '--discover', '--root', oldRoot, '--dry-run'] },
     { event: 'unregister' },
-    { event: 'clients', script: join(currentRoot, 'scripts', 'configure-clients.mjs'), node: join(oldRoot, '.runtime', 'node', 'node.exe'), args: ['--remove', '--root', oldRoot] },
+    { event: 'clients', script: join(currentRoot, 'scripts', 'configure-clients.mjs'), node: join(oldRoot, '.runtime', 'node', 'node.exe'), args: ['--remove', '--discover', '--root', oldRoot] },
   ]);
   for (const name of generated) {
     await assert.rejects(access(join(old, '.local', name)), { code: 'ENOENT' });
@@ -120,7 +120,7 @@ if ($script:removals -ne 1 -or $script:registration.Exists) { throw 'Client fail
   const oldRoot = await realpath(old);
   assert.deepEqual(await records(), [
     { event: 'unregister' },
-    { event: 'clients', script: join(oldRoot, 'scripts', 'configure-clients.mjs'), node: await realpath(process.execPath), args: ['--remove', '--root', oldRoot] },
+    { event: 'clients', script: join(oldRoot, 'scripts', 'configure-clients.mjs'), node: await realpath(process.execPath), args: ['--remove', '--discover', '--root', oldRoot] },
   ]);
   for (const name of generated) {
     await assert.rejects(access(join(old, '.local', name)), { code: 'ENOENT' });
@@ -168,5 +168,27 @@ if ($script:removals -ne 1 -or $script:registration.Exists) { throw 'Client disc
   for (const name of generated) {
     await assert.rejects(access(join(old, '.local', name)), { code: 'ENOENT' });
     await access(join(current, '.local', name));
+  }
+});
+
+test('uninstall discovers own client installations when native registration is absent or cannot identify a root', windows, async t => {
+  for (const kind of ['absent', 'unknown']) {
+    await t.test(kind, async subtest => {
+      const { current, run, records } = await fixture(subtest);
+      await registrar(current);
+      const output = await run(`
+$script:registration = [pscustomobject]@{ Exists = ${kind === 'absent' ? '$false' : '$true'}; Manifest = $null; HasChildren = $false }
+Invoke-FirefoxBridgeUninstall -WhatIf
+Invoke-FirefoxBridgeUninstall
+if ($script:removals -ne ${kind === 'absent' ? 0 : 1}) { throw 'Unexpected native mutation.' }
+`);
+      assert.ok(!output.includes('FIXTURE_ONLY_SECRET'));
+      const currentRoot = await realpath(current), node = await realpath(process.execPath);
+      const calls = (await records()).filter(item => item.event === 'clients');
+      assert.deepEqual(calls, [
+        { event: 'clients', script: join(currentRoot, 'scripts', 'configure-clients.mjs'), node, args: ['--remove', '--discover', '--root', currentRoot, '--dry-run'] },
+        { event: 'clients', script: join(currentRoot, 'scripts', 'configure-clients.mjs'), node, args: ['--remove', '--discover', '--root', currentRoot] },
+      ]);
+    });
   }
 });

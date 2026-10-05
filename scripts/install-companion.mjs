@@ -36,7 +36,7 @@ export function parseInstallArgs(args) {
 async function configureInstalledClients(root, remove) {
   try {
     const { configureClients } = await import('./client-config.mjs');
-    const results = await configureClients({ root, remove });
+    const results = await configureClients({ root, remove, ...(remove ? { discover: true } : { relocate: true }) });
     for (const item of results) console.log(item.label + ': ' + item.status + (item.message ? ' - ' + item.message : ''));
     return results.some(item => ['conflict', 'error'].includes(item.status)) ? 2 : 0;
   } catch {
@@ -51,11 +51,11 @@ export async function main(args = process.argv.slice(2)) {
   const manifestPath = join(options.root, '.local', 'de.codex.firefox_bridge.json');
   if (options.remove) {
     // Do not install dependencies or delete the application during deregistration.
-    const result = await unregisterNativeHost({ manifestPath, dryRun: options.dryRun });
+    const result = await unregisterNativeHost({ manifestPath, discover: true, dryRun: options.dryRun });
     console.log(options.dryRun ? 'Deregistrierung geprueft; keine Aenderung.' : 'Native Host deregistriert. Dateien und Einstellungen bleiben erhalten.');
     if (!options.dryRun) {
       const { clearRegistrationStatus } = await import('./registration.mjs');
-      await clearRegistrationStatus(join(options.root, '.local', 'config.json'));
+      await clearRegistrationStatus(join(dirname(result.manifestPath), 'config.json'));
     }
     return options.noClients || options.dryRun ? 0 : configureInstalledClients(options.root, true);
   }

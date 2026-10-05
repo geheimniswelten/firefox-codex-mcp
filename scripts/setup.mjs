@@ -3,7 +3,7 @@ import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { HOST_NAME, EXTENSION_ID, REGISTRATION_REVISION, INSTALLER_VERSION, registerNativeHost, unregisterNativeHost, writeRegistrationStatus, removeRegistrationStatus } from './registration.mjs';
+import { HOST_NAME, EXTENSION_ID, REGISTRATION_REVISION, INSTALLER_VERSION, registrationPlatform, registerNativeHost, unregisterNativeHost, writeRegistrationStatus, removeRegistrationStatus } from './registration.mjs';
 
 export { HOST_NAME, EXTENSION_ID };
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -89,8 +89,13 @@ export function assertRegistrationCompatible(existingPath, manifestPath, platfor
   }
 }
 
-export async function prepareSetup({ root = defaultRoot, nodePath = process.execPath, port, register = false, platform = process.platform, home, registryAdapter, now = Date.now } = {}) {
+export async function prepareSetup({ root = defaultRoot, nodePath = process.execPath, port, register = false, replaceManifestPath, platform = process.platform, home, registryAdapter, now = Date.now } = {}) {
   root = resolve(root);
+  const launcherPlatform = registrationPlatform(platform);
+  if (replaceManifestPath !== undefined) {
+    if (!register || registrationPlatform(platform) !== 'win') throw new Error('Der Austausch eines Native-Manifestpfads benötigt eine Windows-Registrierung mit --register-native.');
+    if (typeof replaceManifestPath !== 'string' || !isAbsolute(replaceManifestPath) || /[\u0000-\u001f\u007f]/u.test(replaceManifestPath)) throw new Error('--replace-native-manifest erwartet den absoluten bisherigen Manifestpfad.');
+  }
   if (!isAbsolute(nodePath)) throw new Error('Node-Pfad muss absolut sein.');
   if (port !== undefined && (!Number.isInteger(port) || port < 1024 || port > 65535)) {
     throw new Error('Port muss eine ganze Zahl zwischen 1024 und 65535 sein.');
@@ -114,9 +119,9 @@ export async function prepareSetup({ root = defaultRoot, nodePath = process.exec
 
   const nativePath = join(root, 'server', 'native-host.mjs');
   const mcpPath = join(root, 'server', 'mcp.mjs');
-  const launcherPath = join(local, process.platform === 'win32' ? 'native-host.cmd' : 'native-host.sh');
+  const launcherPath = join(local, launcherPlatform === 'win' ? 'native-host.cmd' : 'native-host.sh');
   let launcher;
-  if (process.platform === 'win32') {
+  if (launcherPlatform === 'win') {
     for (const path of [nodePath, nativePath, configPath]) {
       if (/["\r\n%]/u.test(path)) throw new Error('Windows-Startpfade dürfen weder Anführungszeichen noch Prozentzeichen oder Zeilenumbrüche enthalten.');
     }
@@ -147,18 +152,19 @@ export async function prepareSetup({ root = defaultRoot, nodePath = process.exec
   ].join('\n'));
   let registration = null, registrationStatus = null;
   if (register) {
-    registration = await registerNativeHost({ manifestPath, platform, home, registryAdapter });
+    registration = await registerNativeHost({ manifestPath, replaceManifestPath, relocate: true, platform, home, registryAdapter });
     registrationStatus = await writeRegistrationStatus(configPath, { schemaVersion: 1, registrationRevision: REGISTRATION_REVISION, installerVersion: INSTALLER_VERSION, registeredAt: new Date(now()).toISOString(), platform: registration.platform, manifestPath, registrationPath: registration.registrationPath });
   }
-  return { local, configPath, manifestPath, launcherPath, codexPath, port: config.port, registered: register, registrationPath: registration?.registrationPath ?? null, registrationStatus };
+  return { local, configPath, manifestPath, launcherPath, codexPath, port: config.port, registered: register, registrationPath: registration?.registrationPath ?? null, previousManifestPath: registration?.previousManifestPath ?? null, registrationBackupPath: registration?.backupPath ?? null, registrationStatus };
 }
 
 export async function unregisterSetup({ root = defaultRoot, platform = process.platform, home, registryAdapter, dryRun = false } = {}) {
   root = resolve(root);
-  const local = join(root, '.local'), configPath = join(local, 'config.json'), manifestPath = join(local, `${HOST_NAME}.json`);
-  const result = await unregisterNativeHost({ manifestPath, platform, home, registryAdapter, dryRun });
-  const statusRemoved = await removeRegistrationStatus(configPath, { ...result, dryRun });
-  return { ...result, local, configPath, statusRemoved };
+  const manifestPath = join(root, '.local', `${HOST_NAME}.json`);
+  const result = await unregisterNativeHost({ manifestPath, discover: true, platform, home, registryAdapter, dryRun });
+  const registeredConfigPath = join(dirname(result.manifestPath), 'config.json');
+  const statusRemoved = await removeRegistrationStatus(registeredConfigPath, { ...result, dryRun });
+  return { ...result, local: dirname(result.manifestPath), configPath: registeredConfigPath, statusRemoved };
 }
 
 export async function main(args = process.argv.slice(2)) {
@@ -167,6 +173,11 @@ export async function main(args = process.argv.slice(2)) {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--register-native') options.register = true;
+    else if (arg === '--replace-native-manifest') {
+      const value = args[++index];
+      if (!value || !isAbsolute(value) || /[\u0000-\u001f\u007f]/u.test(value)) throw new Error('--replace-native-manifest erwartet den absoluten bisherigen Manifestpfad.');
+      options.replaceManifestPath = value;
+    }
     else if (arg === '--unregister-native') unregister = true;
     else if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--root') {
@@ -179,18 +190,19 @@ export async function main(args = process.argv.slice(2)) {
       if (!raw || !/^\d+$/u.test(raw)) throw new Error('--port erwartet eine Portnummer.');
       options.port = Number(raw);
     } else if (arg === '--help') {
-      console.log('node scripts/setup.mjs [--root ABSOLUTER_PFAD] [--port 38477] [--register-native]\nnode scripts/setup.mjs [--root ABSOLUTER_PFAD] --unregister-native [--dry-run]\nOhne --register-native werden ausschließlich Projektdateien erzeugt.');
+      console.log('node scripts/setup.mjs [--root ABSOLUTER_PFAD] [--port 38477] [--register-native [--replace-native-manifest ALTER_ABSOLUTER_MANIFESTPFAD]]\nnode scripts/setup.mjs [--root ABSOLUTER_PFAD] --unregister-native [--dry-run]\nOhne --register-native werden ausschließlich Projektdateien erzeugt.');
       return;
     } else throw new Error(`Unbekannte Option: ${arg}`);
   }
   if (unregister) {
-    if (options.register || options.port !== undefined) throw new Error('--unregister-native darf nicht mit Registrierung oder --port kombiniert werden.');
+    if (options.register || options.port !== undefined || options.replaceManifestPath !== undefined) throw new Error('--unregister-native darf nicht mit Registrierung, Manifestaustausch oder --port kombiniert werden.');
     const result = await unregisterSetup(options);
     console.log(`${result.dryRun ? 'Vorschau: ' : ''}Native-Host-Registrierung ${result.changed ? result.dryRun ? 'würde entfernt' : 'entfernt' : 'nicht vorhanden'}.\nRegistrierungspfad: ${result.registrationPath}\nProjektdateien und KI-Client-Konfigurationen bleiben erhalten.`);
     return result;
   }
   if (options.dryRun) throw new Error('--dry-run ist nur mit --unregister-native möglich.');
   const result = await prepareSetup(options);
+  if (result.registrationBackupPath) console.log(`Sicherung der bisherigen Native-Host-Registrierung: ${result.registrationBackupPath}`);
   console.log(`Lokale Konfiguration: ${result.configPath}\nCodex-Konfigurationsvorlage: ${result.codexPath}\nNative-Host-Manifest: ${result.manifestPath}\nPort: ${result.port}\nNative Host registriert: ${result.registered ? 'ja' : 'nein'}\nFirefox-Erweiterung danach laden bzw. neu laden. KI-Clients: scripts/configure-clients.mjs (wird von install.ps1 automatisch ausgefuehrt).`);
 }
 

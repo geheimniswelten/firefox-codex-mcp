@@ -1,15 +1,33 @@
 # Shared source for the standalone Windows downloads. ASCII for PowerShell 5.1.
 function Get-FirefoxInstalledRoot {
-    $key = Get-Item -LiteralPath 'HKCU:\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge' -ErrorAction SilentlyContinue
-    if (-not $key) { return $null }
     try {
-        $manifestPath = [string]$key.GetValue('')
-        $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
-        if ($manifest.name -ne 'de.codex.firefox_bridge' -or $manifest.type -ne 'stdio' -or @($manifest.allowed_extensions).Count -ne 1 -or $manifest.allowed_extensions[0] -ne 'firefox-codex-mcp@local.invalid') { return $null }
-        $local = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($manifest.path))
-        if ([IO.Path]::GetFileName($local) -ne '.local' -or [IO.Path]::GetFileName($manifest.path) -ne 'native-host.cmd') { return $null }
-        return [IO.Path]::GetDirectoryName($local)
+        $registration = Get-FirefoxNativeRegistration
+        if ($registration) { return $registration.Root }
+        return $null
     } catch { return $null }
+}
+function Get-FirefoxNativeRegistration {
+    $registryPath = 'HKCU:\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge'
+    $key = Get-Item -LiteralPath $registryPath -ErrorAction SilentlyContinue
+    if (-not $key) { return $null }
+    if (@(Get-ChildItem -LiteralPath $registryPath).Count -gt 0 -or @($key.GetValueNames()).Count -ne 1 -or @($key.GetValueNames())[0] -ne '' -or $key.GetValueKind('') -ne [Microsoft.Win32.RegistryValueKind]::String) { throw 'The registration has unexpected values or child keys; nothing removed.' }
+    $registeredValue = [string]$key.GetValue('')
+    $manifestPath = $registeredValue
+    if ($manifestPath -notmatch '^(?:[a-zA-Z]:[\\/]|\\\\[^\\]+\\[^\\]+(?:\\|$))') { throw 'The registered manifest path is not fully qualified; nothing removed.' }
+    $manifestPath = [IO.Path]::GetFullPath($manifestPath)
+    $local = [IO.Path]::GetDirectoryName($manifestPath)
+    if ([IO.Path]::GetFileName($local) -ne '.local' -or [IO.Path]::GetFileName($manifestPath) -ne 'de.codex.firefox_bridge.json') { throw 'The registered path does not identify this companion; nothing removed.' }
+    $root = [IO.Path]::GetDirectoryName($local)
+    if ($root.TrimEnd([char[]]'\/') -eq [IO.Path]::GetPathRoot($root).TrimEnd([char[]]'\/')) { throw 'The registered companion root is unsafe; nothing removed.' }
+    Assert-FirefoxOrdinaryPath -Path $manifestPath
+    $manifestText = $null
+    if ([IO.File]::Exists($manifestPath)) {
+        $manifestText = [IO.File]::ReadAllText($manifestPath)
+        $manifest = $manifestText | ConvertFrom-Json
+        $expectedLauncher = [IO.Path]::Combine($root, '.local\native-host.cmd')
+        if ($manifest.name -ne 'de.codex.firefox_bridge' -or $manifest.type -ne 'stdio' -or @($manifest.allowed_extensions).Count -ne 1 -or $manifest.allowed_extensions[0] -ne 'firefox-codex-mcp@local.invalid' -or -not $manifest.path -or $manifest.path -notmatch '^(?:[a-zA-Z]:[\\/]|\\\\[^\\]+\\[^\\]+(?:\\|$))' -or -not [string]::Equals([IO.Path]::GetFullPath($manifest.path), $expectedLauncher, [StringComparison]::OrdinalIgnoreCase)) { throw 'The manifest does not identify this companion; nothing removed.' }
+    }
+    return [pscustomobject]@{ Root = $root; ManifestPath = $manifestPath; RegisteredValue = $registeredValue; ManifestText = $manifestText }
 }
 function Get-FirefoxSetupRoot {
     param([string]$RequestedRoot)

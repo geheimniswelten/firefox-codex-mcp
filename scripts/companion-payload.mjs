@@ -6,7 +6,7 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 export const PAYLOAD_SCHEMA = 1;
 const companionFiles = [
   'package.json', 'package-lock.json', 'LICENSE.md', 'README.md', 'PROTOCOL.md',
-  'install.ps1', 'scripts/node-runtime.ps1', 'scripts/open-firefox-setup.ps1',
+  'install.ps1', 'uninstall.ps1', 'scripts/node-runtime.ps1', 'scripts/open-firefox-setup.ps1', 'scripts/finish-relocation.ps1',
   'scripts/setup.mjs', 'scripts/registration.mjs', 'scripts/install-companion.mjs',
   'scripts/companion-payload.mjs', 'scripts/client-config.mjs', 'scripts/configure-clients.mjs',
 ];

@@ -6,13 +6,15 @@ export async function main(args = process.argv.slice(2)) {
   const options = { root: resolve(dirname(fileURLToPath(import.meta.url)), '..') };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--remove') options.remove = true;
+    else if (args[i] === '--relocate') options.relocate = true;
+    else if (args[i] === '--discover') options.discover = true;
     else if (args[i] === '--dry-run') options.dryRun = true;
     else if (args[i] === '--root') {
       const value = args[++i];
       if (!value || !isAbsolute(value)) throw new Error('--root requires an absolute project directory.');
       options.root = value;
     } else if (args[i] === '--help') {
-      console.log('node scripts/configure-clients.mjs [--root ABSOLUTE_PROJECT] [--remove] [--dry-run]');
+      console.log('node scripts/configure-clients.mjs [--root ABSOLUTE_PROJECT] [--relocate] [--dry-run]\nnode scripts/configure-clients.mjs [--root ABSOLUTE_PROJECT] --remove [--discover] [--dry-run]');
       return 0;
     } else throw new Error('Unknown client setup option.');
   }

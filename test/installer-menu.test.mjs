@@ -326,3 +326,23 @@ Stop-FirefoxBridgeProcess $snapshot
   // The helper test stops only its own process; it never invokes live uninstall.
   for (const name of generated) await access(join(root, '.local', name));
 });
+
+test('uninstall removes only valid registration receipts belonging to the cleanup installation', { skip: !windows }, async t => {
+  for (const kind of ['own', 'foreign', 'invalid']) {
+    await t.test(kind, async subtest => {
+      const root = await fixture(subtest);
+      const path = join(root, '.local', 'registration-status.json');
+      const receipt = { schemaVersion: 1, registrationRevision: 1, installerVersion: '1.0.5', registeredAt: '2026-10-05T10:00:00.000Z', platform: 'win', manifestPath: join(kind === 'foreign' ? join(root, 'other installation') : root, '.local', 'de.codex.firefox_bridge.json'), registrationPath: 'HKCU\\Software\\Mozilla\\NativeMessagingHosts\\de.codex.firefox_bridge' };
+      const source = kind === 'invalid' ? 'INVALID_FIXTURE_RECEIPT' : JSON.stringify(receipt);
+      await writeFile(path, source);
+      const output = await runHarness(root, `
+Invoke-FirefoxBridgeUninstall -WhatIf
+if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot '.local\\registration-status.json'))) { throw 'Preview removed receipt.' }
+Invoke-FirefoxBridgeUninstall
+`);
+      assert.ok(!output.includes('INVALID_FIXTURE_RECEIPT'));
+      if (kind === 'own') await assert.rejects(access(path), { code: 'ENOENT' });
+      else assert.equal(await readFile(path, 'utf8'), source);
+    });
+  }
+});

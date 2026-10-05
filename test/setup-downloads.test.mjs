@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { link, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -10,8 +10,9 @@ import { buildSetupDownloads } from '../scripts/build-setup-downloads.mjs';
 import { defaultInstallationRoot, parseInstallArgs } from '../scripts/install-companion.mjs';
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const nativeRegistry = 'HKCU\\Software\\Mozilla\\NativeMessagingHosts\\de.codex.firefox_bridge';
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'firefox-setup-download-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'firefox-setup-download-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -158,4 +159,147 @@ test('Windows self-contained download calls installed setup with named switches 
   assert.deepEqual(JSON.parse(await readFile(join(output, 'called.json'), 'utf8')), { NoOpenFirefox: true, NoDownload: true, NoRegisterClients: true, Port: 43210 });
   assert.equal(await readFile(outside, 'utf8'), 'external file stays untouched');
   assert.deepEqual(await readFile(join(output, 'server/native-host.mjs')), Buffer.from(payload.files.find(file => file.path === 'server/native-host.mjs').data, 'base64'));
+});
+
+async function windowsUnregisterFixture(t, { manifest, requestedRoot, registeredManifestPath, receiptOverrides = {}, scenario = '', clients = false, registrar = false } = {}) {
+  const directory = await fixture(t), oldRoot = join(directory, 'old missing companion'), newRoot = join(directory, 'current companion');
+  const manifestPath = join(oldRoot, '.local', 'de.codex.firefox_bridge.json');
+  const removed = join(directory, 'registry-removed.txt'), called = join(directory, 'clients-called.json');
+  await mkdir(newRoot, { recursive: true });
+  if (manifest !== undefined) {
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await writeFile(manifestPath, JSON.stringify(manifest === true ? { name: 'de.codex.firefox_bridge', type: 'stdio', allowed_extensions: ['firefox-codex-mcp@local.invalid'], path: join(oldRoot, '.local', 'native-host.cmd') } : manifest));
+    await writeFile(join(oldRoot, '.local', 'registration-status.json'), JSON.stringify({ schemaVersion: 1, platform: 'win', registrationRevision: 1, installerVersion: '1.0.5', registeredAt: '2026-10-05T12:00:00.000Z', manifestPath, registrationPath: nativeRegistry, ...receiptOverrides }));
+  }
+  if (registrar) {
+    await mkdir(join(newRoot, 'scripts'));
+    await writeFile(join(newRoot, 'scripts', 'configure-clients.mjs'), `import {writeFileSync} from 'node:fs'; writeFileSync(process.env.FIREFOX_MCP_TEST_CALLED, JSON.stringify(process.argv.slice(2)));`);
+  }
+  // Replace every registry operation at the OS boundary. Tests never access the
+  // user's real key, and the removal mock rejects recursive operations.
+  const mock = String.raw`
+$global:registrationReads = 0
+function Get-Item {
+    [CmdletBinding()] param([string]$LiteralPath, [switch]$Force)
+    if ($LiteralPath -ne 'HKCU:\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge') { return Microsoft.PowerShell.Management\Get-Item -LiteralPath $LiteralPath -Force:$Force -ErrorAction SilentlyContinue }
+    if ($env:FIREFOX_MCP_TEST_SCENARIO -eq 'absent') { return $null }
+    $global:registrationReads++
+    $value = $env:FIREFOX_MCP_TEST_MANIFEST
+    if ($env:FIREFOX_MCP_TEST_SCENARIO -eq 'changed' -and $global:registrationReads -gt 1) { $value = $env:FIREFOX_MCP_TEST_ALTERNATE }
+    $names = @('')
+    if ($env:FIREFOX_MCP_TEST_SCENARIO -eq 'extra-value' -or ($env:FIREFOX_MCP_TEST_SCENARIO -eq 'changed-extra-value' -and $global:registrationReads -gt 1)) { $names += 'external' }
+    $key = [pscustomobject]@{ Value = $value; Names = $names }
+    $key | Add-Member -MemberType ScriptMethod -Name GetValue -Value { param($name) return $this.Value }
+    $key | Add-Member -MemberType ScriptMethod -Name GetValueNames -Value { return $this.Names }
+    $key | Add-Member -MemberType ScriptMethod -Name GetValueKind -Value { param($name) return [Microsoft.Win32.RegistryValueKind]::String }
+    return $key
+}
+function Get-ChildItem {
+    [CmdletBinding()] param([string]$LiteralPath)
+    if ($LiteralPath -ne 'HKCU:\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge') { throw 'Unexpected child enumeration in registry test.' }
+    if ($env:FIREFOX_MCP_TEST_SCENARIO -eq 'child-key') { return 'external-child' }
+}
+function Remove-Item {
+    [CmdletBinding()] param([string]$LiteralPath, [switch]$Force, [switch]$Recurse)
+    if ($Recurse) { throw 'Recursive removal is forbidden.' }
+    if ($LiteralPath -eq 'HKCU:\Software\Mozilla\NativeMessagingHosts\de.codex.firefox_bridge') { [IO.File]::WriteAllText($env:FIREFOX_MCP_TEST_REMOVED, 'removed'); return }
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath $LiteralPath -Force:$Force
+}
+function Get-Command {
+    [CmdletBinding()] param([string]$Name, [switch]$All, [string]$CommandType)
+    if ($env:FIREFOX_MCP_TEST_SCENARIO -ne 'no-node') { return [pscustomobject]@{ Source = $env:FIREFOX_MCP_TEST_NODE } }
+}
+`;
+  const common = await readFile(join(project, 'scripts/templates/setup-common.ps1'), 'utf8');
+  const source = (await readFile(join(project, 'scripts/templates/unregister.ps1'), 'utf8')).replace('__COMMON_PS__', () => common + mock);
+  const script = join(newRoot, 'unregister.ps1'); await writeFile(script, source);
+  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script];
+  if (requestedRoot !== false) args.push('-ProjectRoot', requestedRoot || newRoot);
+  if (!clients) args.push('-NoRegisterClients');
+  const result = spawnSync('powershell.exe', args, { encoding: 'utf8', windowsHide: true, timeout: 15000,
+    cwd: directory, env: { ...process.env, FIREFOX_MCP_TEST_MANIFEST: registeredManifestPath || manifestPath, FIREFOX_MCP_TEST_ALTERNATE: join(newRoot, '.local', 'de.codex.firefox_bridge.json'), FIREFOX_MCP_TEST_SCENARIO: scenario, FIREFOX_MCP_TEST_REMOVED: removed, FIREFOX_MCP_TEST_CALLED: called, FIREFOX_MCP_TEST_NODE: process.execPath },
+  });
+  return { result, directory, oldRoot, newRoot, manifestPath, removed, called };
+}
+
+test('Windows standalone unregister discovers missing old installations and ignores an explicit new root without Node', { skip: process.platform !== 'win32' }, async t => {
+  const f = await windowsUnregisterFixture(t, { scenario: 'no-node' });
+  assert.equal(f.result.status, 0, f.result.stderr || f.result.stdout);
+  assert.equal(await readFile(f.removed, 'utf8'), 'removed');
+  assert.match(f.result.stdout, /Native Host deregistered/u);
+  const missingDrive = await windowsUnregisterFixture(t, { scenario: 'no-node', registeredManifestPath: 'Y:\\no-longer-mounted-firefox-companion\\.local\\de.codex.firefox_bridge.json' });
+  assert.equal(missingDrive.result.status, 0, missingDrive.result.stderr || missingDrive.result.stdout);
+  assert.equal(await readFile(missingDrive.removed, 'utf8'), 'removed');
+});
+
+test('Windows standalone unregister removes an old valid receipt and uses the current parser for discovered client cleanup', { skip: process.platform !== 'win32' }, async t => {
+  const f = await windowsUnregisterFixture(t, { manifest: true, clients: true, registrar: true });
+  assert.equal(f.result.status, 0, f.result.stderr || f.result.stdout);
+  assert.equal(await readFile(f.removed, 'utf8'), 'removed');
+  assert.deepEqual(JSON.parse(await readFile(f.called, 'utf8')), ['--root', f.oldRoot, '--remove', '--discover']);
+  await assert.rejects(readFile(join(f.oldRoot, '.local', 'registration-status.json')), { code: 'ENOENT' });
+  assert.match(await readFile(f.manifestPath, 'utf8'), /de\.codex\.firefox_bridge/u);
+});
+
+test('Windows standalone unregister preserves foreign manifests, additional values, child keys and changed snapshots', { skip: process.platform !== 'win32' }, async t => {
+  for (const options of [{ manifest: { name: 'another.application' } }, { scenario: 'extra-value' }, { scenario: 'child-key' }, { scenario: 'changed' }, { scenario: 'changed-extra-value' }]) {
+    const f = await windowsUnregisterFixture(t, options);
+    assert.equal(f.result.status, 1, f.result.stderr || f.result.stdout);
+    await assert.rejects(readFile(f.removed), { code: 'ENOENT' });
+    if (options.manifest) assert.deepEqual(JSON.parse(await readFile(f.manifestPath, 'utf8')), options.manifest);
+  }
+});
+
+test('Windows standalone unregister preserves unknown, foreign and malformed receipt metadata', { skip: process.platform !== 'win32' }, async t => {
+  for (const receiptOverrides of [{ schemaVersion: 99 }, { schemaVersion: '1' }, { platform: 'linux' }, { registrationPath: 'another registry' }, { registeredAt: '2026-99-99T12:00:00.000Z' }]) {
+    const f = await windowsUnregisterFixture(t, { manifest: true, receiptOverrides });
+    assert.equal(f.result.status, 0, f.result.stderr || f.result.stdout);
+    assert.equal(await readFile(f.removed, 'utf8'), 'removed');
+    const receipt = JSON.parse(await readFile(join(f.oldRoot, '.local', 'registration-status.json'), 'utf8'));
+    for (const [key, value] of Object.entries(receiptOverrides)) assert.equal(receipt[key], value);
+  }
+});
+
+test('Windows standalone unregister is idempotent when no native registration exists and reports optional cleanup separately', { skip: process.platform !== 'win32' }, async t => {
+  const absent = await windowsUnregisterFixture(t, { scenario: 'absent', requestedRoot: false });
+  assert.equal(absent.result.status, 0, absent.result.stderr || absent.result.stdout);
+  await assert.rejects(readFile(absent.removed), { code: 'ENOENT' });
+  const partial = await windowsUnregisterFixture(t, { scenario: 'no-node', clients: true });
+  assert.equal(partial.result.status, 2, partial.result.stderr || partial.result.stdout);
+  assert.equal(await readFile(partial.removed, 'utf8'), 'removed');
+  assert.match(partial.result.stdout, /AI client entries could not be checked/u);
+});
+
+async function unixUnregisterFixture(t, { registered = true, foreign = false, clients = false } = {}) {
+  const directory = await fixture(t), oldRoot = join(directory, 'missing old companion'), newRoot = join(directory, 'new companion'), home = join(directory, 'home');
+  const registrationPath = join(home, '.mozilla', 'native-messaging-hosts', 'de.codex.firefox_bridge.json');
+  const called = join(directory, 'clients-called.json');
+  await mkdir(dirname(registrationPath), { recursive: true });
+  await mkdir(join(newRoot, 'scripts'), { recursive: true });
+  if (registered) await writeFile(registrationPath, JSON.stringify({ name: foreign ? 'another.application' : 'de.codex.firefox_bridge', type: 'stdio', allowed_extensions: ['firefox-codex-mcp@local.invalid'], path: join(oldRoot, '.local', 'native-host.sh') }));
+  await writeFile(join(newRoot, 'scripts', 'client-config.mjs'), `import {writeFileSync} from 'node:fs'; export async function configureClients(options) { writeFileSync(process.env.FIREFOX_MCP_TEST_CALLED, JSON.stringify(options)); return []; }`);
+  const shell = await readFile(join(project, 'scripts/templates/unregister.sh'), 'utf8');
+  const code = shell.split("<<'FIREFOX_DEREGISTER_JS'\n")[1].split('\nFIREFOX_DEREGISTER_JS')[0]
+    .replace('const home = homedir();', 'const home = process.env.FIREFOX_MCP_TEST_HOME;')
+    .replaceAll("process.platform === 'darwin'", 'false').replaceAll("process.platform === 'linux'", 'true');
+  const result = spawnSync(process.execPath, ['--input-type=module', '-', newRoot, clients ? '' : '--no-register-clients', newRoot], {
+    input: code, encoding: 'utf8', timeout: 10000, cwd: directory, env: { ...process.env, FIREFOX_MCP_TEST_HOME: home, FIREFOX_MCP_TEST_CALLED: called },
+  });
+  return { result, registrationPath, oldRoot, newRoot, called };
+}
+
+test('Unix standalone unregister discovers a deleted old companion independently of --root and uses a current client parser', async t => {
+  const f = await unixUnregisterFixture(t, { clients: true });
+  assert.equal(f.result.status, 0, f.result.stderr || f.result.stdout);
+  await assert.rejects(readFile(f.registrationPath), { code: 'ENOENT' });
+  assert.deepEqual(JSON.parse(await readFile(f.called, 'utf8')), { root: f.oldRoot, remove: true, discover: true });
+});
+
+test('Unix standalone unregister succeeds without a registration and preserves foreign manifest content', async t => {
+  const absent = await unixUnregisterFixture(t, { registered: false, clients: true });
+  assert.equal(absent.result.status, 0, absent.result.stderr || absent.result.stdout);
+  assert.deepEqual(JSON.parse(await readFile(absent.called, 'utf8')), { root: absent.newRoot, remove: true, discover: true });
+  const foreign = await unixUnregisterFixture(t, { foreign: true });
+  assert.notEqual(foreign.result.status, 0);
+  assert.equal(JSON.parse(await readFile(foreign.registrationPath, 'utf8')).name, 'another.application');
 });
