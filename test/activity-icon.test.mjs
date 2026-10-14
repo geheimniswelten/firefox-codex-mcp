@@ -52,6 +52,13 @@ async function mount() {
     async getCurrentWindow() { return { id: 1, type: 'normal' }; }
   }
   class Clock extends Date { static now() { return now; } }
+  class InteractionAccess {
+    constructor() { this.settings = { enabled: true, contentMode: 'deny', contentScope: 'active' }; }
+    setSettings(value) { this.settings = { enabled: value.enabled ?? true, contentMode: value.interactionMode || 'deny', contentScope: value.interactionScope || 'active' }; }
+    async restoreApprovals() {}
+    async flushApprovals() {}
+    resetApprovals() {}
+  }
   const policyRealm = vm.createContext({ Date: Clock });
   vm.runInContext(policySource, policyRealm);
   const realm = vm.createContext({
@@ -59,7 +66,7 @@ async function mount() {
     setTimeout(fn, delay) { const id = ++sequence; timers.set(id, { fn, delay, at: now + delay }); return id; },
     clearTimeout: id => timers.delete(id), setInterval: fn => { heartbeat = fn; return 1; },
     FirefoxBridgePolicy: {
-      ContentAccess, normalizeSettings: value => ({ ...defaults, ...value }),
+      ContentAccess, InteractionAccess, normalizeSettings: value => ({ ...defaults, ...value }),
       iconStatus: policyRealm.FirefoxBridgePolicy.iconStatus,
     },
     FirefoxBridgeCore: {

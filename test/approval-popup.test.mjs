@@ -22,7 +22,7 @@ function deferred() {
 }
 
 async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 'normal', openError = false, focusError = false, noReceiver = false, savedState = null, startTime = 10000, tabSessionValues = new Map() } = {}) {
-  let now = startTime, timerSequence = 0, requestSequence = 0, uuidSequence = 0, policy, reads = 0;
+  let now = startTime, timerSequence = 0, requestSequence = 0, uuidSequence = 0, policy, interactions, reads = 0;
   const storageData = savedState || { bridgeSettings: { enabled: true, contentMode: mode, contentScope: scope } };
   const timers = new Map(), posted = [], calls = [], notifications = [];
   const normalWindow = { id: 7, type: 'normal', state: windowState, focused: false, tabs: [
@@ -90,13 +90,16 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
     VERSION: 'test', validate() {}, errorData: error => ({ code: error.code || 'ERROR', message: error.message }),
     createService(_browser, options) {
       policy = options.contentAccess;
+      interactions = options.interactionAccess;
       return { ready: Promise.resolve(), async handle(method, params, context) {
         if (method === 'get_tabs') return { tabs: [await browser.tabs.get(params.tabIds[0])] };
         if (method === 'wait_for') return realm.FirefoxBridgeWait.waitFor(browser, params, { ...context, contentAccess: policy });
-        assert.ok(['read_content', 'wait_for'].includes(method));
+        assert.ok(['read_content', 'wait_for', 'interact'].includes(method));
+        if (method === 'interact' && interactions.settings.contentMode === 'deny') throw Object.assign(new Error('Bedienung gesperrt'), { code: 'INTERACTION_DENIED' });
         context.assertLive();
         const tab = await browser.tabs.get(params.tabId), revision = policy.revision, authorization = {};
         await policy.authorize(tab, authorization, { signal: context.signal });
+        if (method === 'interact') await interactions.authorize(tab, {}, { signal: context.signal, operation: { action: 'click', elementId: 'e1', description: 'Submit' } });
         context.assertLive();
         await policy.assertAfterRead(tab.id, tab.url, revision, authorization);
         reads++;
@@ -124,7 +127,7 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
   const sender = { id: browser.runtime.id, url: browser.runtime.getURL('popup.html') };
   const message = async (value, from = sender) => clone(await browser.runtime.onMessage.emit(value, from)[0]);
   return {
-    browser, port, policy, timers, posted, calls, notifications, sender, storageData, tabSessionValues,
+    browser, port, policy, interactions, timers, posted, calls, notifications, sender, storageData, tabSessionValues,
     reads: () => reads,
     message,
     status: () => message({ type: 'bridge_status' }),
@@ -150,6 +153,27 @@ async function mount({ mode = 'ask-every-time', scope = 'active', windowState = 
     },
   };
 }
+
+test('interaction permission defaults off, opens a distinct prompt and content changes revoke it', async () => {
+  const bridge = await mount({ mode: 'allow', scope: 'all' });
+  const defaultState = await bridge.status();
+  assert.equal(defaultState.settings.interactionMode, 'deny');
+  const denied = await bridge.request(42, 'interact');
+  assert.equal(bridge.posted.find(message => message.id === denied).error.code, 'INTERACTION_DENIED');
+  await bridge.message({ type: 'bridge_settings', settings: { ...defaultState.settings, interactionMode: 'ask-session', interactionScope: 'all' } });
+  await bridge.request(42, 'interact');
+  const pending = (await bridge.status()).pendingApproval;
+  assert.equal(pending.kind, 'interaction');
+  assert.equal(pending.operation.action, 'click');
+  assert.equal(pending.operation.description, 'Submit');
+  await bridge.message({ type: 'approval_answer', id: pending.id, allowed: true }); await settle();
+  const granted = await bridge.status();
+  assert.ok(granted.interactionExpiresAt);
+  await bridge.message({ type: 'bridge_settings', settings: { ...granted.settings, contentScope: 'active' } });
+  assert.equal((await bridge.status()).interactionExpiresAt, null);
+  const invalid = await bridge.message({ type: 'bridge_settings', settings: { ...granted.settings, interactionMode: 'allow' } });
+  assert.equal(invalid.settings.interactionMode, 'deny');
+});
 
 test('approval targets the last normal Firefox window, focuses it and opens only the toolbar popup', async () => {
   const bridge = await mount();

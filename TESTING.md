@@ -1,4 +1,37 @@
-# Prüfstand vom 5. Oktober 2026
+# Prüfstand vom 12. Oktober 2026
+
+## DOM-Zugriff und getrennte Bedienfreigabe (1.0.7)
+
+Der vollständige Lauf mit `node --test --test-concurrency=2 test/*.test.mjs` bestand:
+**442 bestanden, 0 fehlgeschlagen, 2 bedingt übersprungen (444 insgesamt)**.
+Die Ausnahmen betreffen einen hier nicht reproduzierbaren eingeschränkten
+Windows-ACL-Fehler und eine in dieser Windows-Umgebung nicht erlaubte Dateisymlink-Erstellung.
+Neue DOM- und Popup-Prüfungen decken Lesen ohne Schreibfreigabe, getrennte Prompts,
+Widerruf/Fristablauf vor Änderungen, Wiederherstellung getrennt gespeicherter
+Fünf-Tage-Freigaben, fehlende unbegrenzte Bedienfreigabe, Passwortmaskierung,
+native Eingabeereignisse und ungültige Dokument-/Elementreferenzen ab.
+Ein alter Unix-Skript-Test normalisiert jetzt CRLF vor dem Extrahieren seines
+Heredoc-Testcodes; der erste Einzelwiederholungslauf bestätigte außerdem, dass
+ein PowerShell-Timeout unter paralleler Last kein Extraktionsfehler war.
+
+`npm run test:firefox-dom` bestand mit **Firefox 157.0.1** und **23 Prüfungen**
+in einem eigenen unsichtbaren Profil. Echte DOM-Eingaben, Checkboxen, Auswahlfelder,
+Button-Ereignisse, Widerruf während der zusätzlichen Freigabe und Zurückweisung
+alter Referenzen nach Neuladen wurden bestätigt. Die Zustimmung kam aus einem
+Testadapter; das reale Benutzerprofil und dessen Native Host wurden nicht verwendet.
+Windows setzt für diesen Test zusätzlich `MOZ_HEADLESS=1`, damit der unsichtbare
+Modus auch bei einem Firefox-Neustart erhalten bleibt.
+
+Syntax/Manifest: **127 JavaScript-Dateien bestanden**. AMO-Linter: **0 Fehler,
+0 Notices, 3 bekannte Warnungen** (Android-Fallback-Mindestversion und die beiden
+benötigten `.sh`-Downloads). `npm audit --omit=dev`: **0 Befunde**.
+Die unveränderte Entwicklungswerkzeugkette meldet aktuell **6 Audit-Einträge**
+(3 hoch, 3 kritisch; u. a. web-ext/fx-runner/shell-quote). Es wurde kein
+`npm audit fix --force` ausgeführt und keine Abhängigkeitsversion geändert.
+Die Einrichtungsdateien und ZIPs werden mit Version 1.0.7 neu erzeugt; das
+Erweiterungs-ZIP ist unsigniert und ersetzt keine bereits signierte XPI.
+
+## Frühere Prüfstände
 
 ## Manueller ZIP-Build unter Windows
 

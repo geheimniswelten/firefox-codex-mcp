@@ -2,9 +2,11 @@
 (() => {
   "use strict";
   const { createService, errorData, validate, VERSION } = FirefoxBridgeCore;
-  const { ContentAccess, normalizeSettings, iconStatus } = FirefoxBridgePolicy;
+  const { ContentAccess, InteractionAccess, normalizeSettings, iconStatus } = FirefoxBridgePolicy;
   const policy = new ContentAccess(browser, { requestApproval });
-  const service = createService(browser, { contentAccess: policy });
+  const interactions = new InteractionAccess(browser, { requestApproval });
+  const combinedSettings = () => ({ ...policy.settings, interactionMode: interactions.settings.contentMode, interactionScope: interactions.settings.contentScope });
+  const service = createService(browser, { contentAccess: policy, interactionAccess: interactions });
   const REQUIRED_REGISTRATION_REVISION = { win: 1, linux: 1, mac: 1 }, REQUIRED_PROTOCOL_VERSION = 1;
   const CONFIRMATION_KEY = "bridgeSetupLastConfirmation";
   const state = { connected: false, connecting: false, lastError: null, lastAccessAt: null, version: VERSION };
@@ -75,7 +77,7 @@
   function clearHandshakeTimer() { if (handshakeTimer) clearTimeout(handshakeTimer); handshakeTimer = null; }
   function publicState() {
     if (prompt && Date.now() >= prompt.expiresAt) finishPrompt(false, prompt);
-    return { ...state, lastError: state.lastError || metadataError, setup: setupState(), settings: { ...policy.settings }, sessionExpiresAt: policy.settings.contentMode === "ask-session" ? policy.expiresAt : null, fiveDayExpiresAt: policy.settings.contentMode === "ask-five-days" ? policy.expiresAt : null, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
+    return { ...state, lastError: state.lastError || metadataError, setup: setupState(), settings: combinedSettings(), interactionExpiresAt: interactions.expiresAt, sessionExpiresAt: policy.settings.contentMode === "ask-session" ? policy.expiresAt : null, fiveDayExpiresAt: policy.settings.contentMode === "ask-five-days" ? policy.expiresAt : null, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
   }
   function setToolbarIcon(path) {
     wantedIcon = path;
@@ -118,7 +120,7 @@
     wasAnimating = animating;
     const showRecent = status.color === "blue" && !prompt && Date.now() < recentUntil;
     const text = prompt ? "?" : setupBadge;
-    const title = `Firefox ↔ Codex · ${prompt ? "Inhaltsfreigabe erforderlich · Erweiterung anklicken" : setupBadge ? setup.label : status.label}${animating ? " · MCP-Aktivität" : ""}`;
+    const title = `Firefox ↔ Codex · ${prompt ? `${prompt.request.kind === "interaction" ? "Bedienfreigabe" : "Inhaltsfreigabe"} erforderlich · Erweiterung anklicken` : setupBadge ? setup.label : status.label}${animating ? " · MCP-Aktivität" : ""}`;
     if (badgeText !== text) {
       badgeText = text;
       browser.browserAction.setBadgeText({ text }).catch(() => { if (badgeText === text) badgeText = null; });
@@ -228,7 +230,7 @@
     catch (error) { send(target, { id: message.id, error: errorData(error) }); return; }
     if (pendingCount >= 32) { send(target, { id: message.id, error: { code: "BUSY", message: "Zu viele ausstehende Firefox-Anfragen." } }); return; }
     if (waits.has(message.id)) { send(target, { id: message.id, error: { code: "BUSY", message: "Diese Warteanfrage läuft bereits." } }); return; }
-    const controller = ["wait_for", "search_history"].includes(message.method) ? new AbortController() : null;
+    const controller = ["wait_for", "search_history", "read_dom", "interact"].includes(message.method) ? new AbortController() : null;
     if (controller) waits.set(message.id, controller);
     state.lastAccessAt = Date.now(); pendingCount += 1;
     const activity = beginActivity();
@@ -241,12 +243,12 @@
       };
       try {
         assertLive();
-        send(target, { id: message.id, result: await service.handle(message.method, message.params ?? {}, { assertLive, signal: controller?.signal }) });
+        send(target, { id: message.id, result: await service.handle(message.method, message.params ?? {}, { assertLive, signal: controller?.signal, expiresAt: message.expiresAt }) });
       } catch (error) { send(target, { id: message.id, error: errorData(error) }); }
     };
     // Permission prompts and history scans do not hold tab-control requests in the queue.
     const completed = () => { pendingCount -= 1; if (controller) waits.delete(message.id); finishActivity(activity); };
-    if (["read_content", "save_png", "save_html", "save_pdf", "wait_for", "search_history"].includes(message.method)) execute().finally(completed);
+    if (["read_content", "read_dom", "interact", "save_png", "save_html", "save_pdf", "wait_for", "search_history"].includes(message.method)) execute().finally(completed);
     else queue = queue.then(execute).catch(() => {}).finally(completed);
   }
   function connect() {
@@ -285,16 +287,17 @@
     }
     if (message.type === "bridge_status") return startup.then(publicState);
     if (message.type === "bridge_reset_approvals") return startup.then(async () => {
-      policy.resetApprovals(); service.clearExports?.(); finishPrompt(false); badge(); notifyPopup();
-      await policy.flushApprovals(); return publicState();
+      policy.resetApprovals(); interactions.resetApprovals(); service.clearExports?.(); finishPrompt(false); badge(); notifyPopup();
+      await Promise.all([policy.flushApprovals(), interactions.flushApprovals()]); return publicState();
     });
     if (message.type === "bridge_reconnect") return startup.then(() => { disconnect(); retryDelay = 1000; connect(); return publicState(); });
     if (message.type === "bridge_settings" && message.settings && typeof message.settings === "object") return startup.then(async () => {
-      const before = JSON.stringify(policy.settings);
+      const before = JSON.stringify(combinedSettings());
       const settings = policy.setSettings(normalizeSettings(message.settings));
-      if (JSON.stringify(settings) !== before) { service.clearExports?.(); finishPrompt(false); }
-      await policy.flushApprovals();
-      await browser.storage.local.set({ bridgeSettings: settings });
+      interactions.setSettings(message.settings);
+      if (JSON.stringify(combinedSettings()) !== before) { policy.resetApprovals(); interactions.resetApprovals(); service.clearExports?.(); finishPrompt(false); }
+      await Promise.all([policy.flushApprovals(), interactions.flushApprovals()]);
+      await browser.storage.local.set({ bridgeSettings: combinedSettings() });
       if (!settings.enabled) disconnect(); else connect();
       badge(); return publicState();
     });
@@ -310,7 +313,8 @@
     const previousMetadata = parseSetupMetadata(previous);
     if (previousMetadata?.registration && isoTime(previous.verifiedAt)) lastConfirmation = { ...previousMetadata, verifiedAt: previous.verifiedAt };
     policy.setSettings(saved.bridgeSettings || {}, { persist: false });
-    await policy.restoreApprovals();
+    interactions.setSettings(saved.bridgeSettings || {}, { persist: false });
+    await Promise.all([policy.restoreApprovals(), interactions.restoreApprovals()]);
     await service.ready;
     connect(); badge();
   })().catch(error => { state.lastError = String(error.message || error).slice(0, 1000); badge(); });

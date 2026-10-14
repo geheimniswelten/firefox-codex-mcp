@@ -55,8 +55,9 @@
     stop() { this.browser.windows.onFocusChanged.removeListener(this.listener); }
   }
   class ContentAccess {
-    constructor(browser, { now = Date.now, requestApproval = async () => false, settings = DEFAULTS } = {}) {
+    constructor(browser, { now = Date.now, requestApproval = async () => false, settings = DEFAULTS, approvalsKey = APPROVALS_KEY, tabApprovalKey = TAB_APPROVAL_KEY, kind = "content" } = {}) {
       this.browser = browser; this.now = now; this.requestApproval = requestApproval;
+      this.approvalsKey = approvalsKey; this.tabApprovalKey = tabApprovalKey; this.kind = kind;
       this.settings = normalizeSettings(settings); this.revision = 0; this.expiresAt = null; this.promptPending = false;
       this.tabGrants = new Map(); this.tabRevisions = new Map(); this.authorizations = new WeakMap();
       this.policyEpoch = null; this.globalApproval = null; this.savedTabGrants = new Map(); this.tabTokens = new Map();
@@ -71,7 +72,7 @@
       browser.tabs.onRemoved.addListener(tabId => { revokeTab(tabId); this.tabTokens.delete(tabId); });
       browser.tabs.onCreated?.addListener(tab => {
         if (this.settings.contentMode !== "ask-five-days" || !this.savedTabGrants.size) return;
-        this.browser.sessions?.getTabValue?.(tab.id, TAB_APPROVAL_KEY).then(token => {
+        this.browser.sessions?.getTabValue?.(tab.id, this.tabApprovalKey).then(token => {
           if (this.savedTabGrants.has(token)) this.revokeToken(token);
         }).catch(() => { for (const token of this.savedTabGrants.keys()) this.revokeToken(token); });
       });
@@ -102,7 +103,7 @@
       const write = this.persistQueue.then(async () => {
         try {
           if (!this.browser.storage?.local?.set) throw new Error("Browser-Speicher ist nicht verfügbar.");
-          await this.browser.storage.local.set({ [APPROVALS_KEY]: snapshot });
+          await this.browser.storage.local.set({ [this.approvalsKey]: snapshot });
           this.persistFailure = null;
         } catch {
           const error = accessError("APPROVAL_PERSISTENCE_FAILED", "Die fünftägige Freigabe konnte nicht sicher gespeichert werden. Erneut anfragen.");
@@ -125,7 +126,7 @@
       if (this.settings.contentMode !== "ask-five-days") return;
       const revision = this.revision;
       let stored;
-      try { stored = (await this.browser.storage.local.get(APPROVALS_KEY))[APPROVALS_KEY]; }
+      try { stored = (await this.browser.storage.local.get(this.approvalsKey))[this.approvalsKey]; }
       catch { throw accessError("APPROVAL_PERSISTENCE_FAILED", "Gespeicherte Inhaltsfreigaben konnten nicht sicher geladen werden."); }
       if (revision !== this.revision) throw accessError("PERMISSION_CHANGED", "Die Inhaltsfreigaben wurden während des Ladens geändert.");
       this.persistEnabled = true; this.policyEpoch = uuid();
@@ -138,7 +139,7 @@
         try { tabs = await this.browser.tabs.query({}); } catch { tabs = []; }
         const identities = await Promise.all(tabs.map(async tab => {
           const generation = this.tabRevisions.get(tab.id) || 0;
-          try { return { tab, token: await this.browser.sessions.getTabValue(tab.id, TAB_APPROVAL_KEY), generation }; }
+          try { return { tab, token: await this.browser.sessions.getTabValue(tab.id, this.tabApprovalKey), generation }; }
           catch { return { tab, token: null, generation }; }
         }));
         const counts = new Map();
@@ -176,11 +177,11 @@
     async tabToken(tabId) {
       if (!this.browser.sessions?.getTabValue || !this.browser.sessions?.setTabValue || !this.browser.tabs.query) throw accessError("APPROVAL_PERSISTENCE_FAILED", "Firefox kann diese Tab-Freigabe nicht dauerhaft eindeutig speichern.");
       const tabs = await this.browser.tabs.query({});
-      const values = await Promise.all(tabs.map(async tab => ({ id: tab.id, token: await this.browser.sessions.getTabValue(tab.id, TAB_APPROVAL_KEY) })));
+      const values = await Promise.all(tabs.map(async tab => ({ id: tab.id, token: await this.browser.sessions.getTabValue(tab.id, this.tabApprovalKey) })));
       let token = values.find(tab => tab.id === tabId)?.token;
       if (!isUuid(token) || values.filter(tab => tab.token === token).length !== 1) {
         if (isUuid(token)) this.revokeToken(token);
-        token = uuid(); await this.browser.sessions.setTabValue(tabId, TAB_APPROVAL_KEY, token);
+        token = uuid(); await this.browser.sessions.setTabValue(tabId, this.tabApprovalKey, token);
       }
       return token;
     }
@@ -239,7 +240,7 @@
     }
     async assertTabIdentity(grant) {
       let token;
-      try { token = await this.browser.sessions.getTabValue(grant.tabId, TAB_APPROVAL_KEY); }
+      try { token = await this.browser.sessions.getTabValue(grant.tabId, this.tabApprovalKey); }
       catch { this.revokeToken(grant.token); throw accessError("CONTENT_DENIED", "Die gespeicherte Tab-Identität kann nicht mehr geprüft werden."); }
       if (token !== grant.token) { this.revokeToken(grant.token); throw accessError("CONTENT_DENIED", "Die gespeicherte Tab-Identität wurde geändert."); }
     }
@@ -258,7 +259,7 @@
       if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Zugriffseinstellungen wurden während der Anfrage geändert.");
       return tab;
     }
-    async authorize(tab, authorization = {}, { signal } = {}) {
+    async authorize(tab, authorization = {}, { signal, operation } = {}) {
       const assertPending = () => { if (signal?.aborted) throw signal.reason || accessError("CANCELLED", "Die Inhaltsanfrage wurde abgebrochen."); };
       assertPending();
       this.authorizations.delete(authorization);
@@ -294,7 +295,7 @@
       this.promptPending = true;
       let allowed;
       try {
-        allowed = await this.requestApproval({ tabId: tab.id, url: tab.url, title: tab.title || "", mode: tabScoped && mode === "allow" ? "ask-every-time" : mode, scope: tabScoped ? "tab" : this.settings.contentScope }, { signal });
+        allowed = await this.requestApproval({ tabId: tab.id, url: tab.url, title: tab.title || "", mode: tabScoped && mode === "allow" ? "ask-every-time" : mode, scope: tabScoped ? "tab" : this.settings.contentScope, ...(this.kind === "interaction" ? { kind: "interaction", operation } : {}) }, { signal });
         const acceptedAt = this.now();
         assertPending();
         if (!allowed) throw accessError("CONTENT_DENIED", "Inhaltszugriff wurde nicht freigegeben.");
@@ -340,5 +341,17 @@
       return tab;
     }
   }
-  globalThis.FirefoxBridgePolicy = { SESSION_MS, FIVE_DAYS_MS, DEFAULTS, normalizeSettings, iconStatus, NormalWindowTracker, ContentAccess };
+  function normalizeInteractionSettings(value = {}) {
+    return { enabled: typeof value.enabled === "boolean" ? value.enabled : true,
+      contentMode: ["deny","ask-every-time","ask-session","ask-five-days"].includes(value.interactionMode) ? value.interactionMode : "deny",
+      contentScope: ["all","active"].includes(value.interactionScope) ? value.interactionScope : "active" };
+  }
+  class InteractionAccess extends ContentAccess {
+    constructor(browser, options = {}) {
+      super(browser, { ...options, settings: normalizeInteractionSettings(options.settings), kind: "interaction",
+        approvalsKey: "bridgeInteractionFiveDayApprovals", tabApprovalKey: "firefoxBridgeInteractionApprovalId" });
+    }
+    setSettings(value, options) { return super.setSettings(normalizeInteractionSettings(value), options); }
+  }
+  globalThis.FirefoxBridgePolicy = { SESSION_MS, FIVE_DAYS_MS, DEFAULTS, normalizeSettings, normalizeInteractionSettings, iconStatus, NormalWindowTracker, ContentAccess, InteractionAccess };
 })();

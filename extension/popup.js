@@ -22,12 +22,19 @@ function renderApproval(approval) {
   }
   setText("approvalTitle", approval.title || "Ohne Titel");
   setText("approvalUrl", approval.url);
+  const interaction = approval.kind === "interaction";
+  const actionLabels = { fill: "Eingabe ausfüllen", set_checked: "Checkbox/Radio-Button setzen", select: "Auswahl ändern", click: "Element anklicken" };
+  setText("approvalHeading", interaction ? "Seitenelemente bedienen erlauben?" : "Seiteninhalt freigeben?");
+  setText("approvalImpact", interaction
+    ? `${actionLabels[approval.operation?.action] || "Seitenelement bedienen"}: ${approval.operation?.description || approval.operation?.elementId || ""}. Freigegebene Aktionen können Formulare absenden oder eine andere Seite öffnen.`
+    : "Codex erhält Seitentext, HTML, Eingabewerte oder Links, auch private Inhalte.");
   const scope = approval.scope === "tab" ? "diesen Tab mit genau der oben angegebenen URL" : approval.scope === "active" ? "jeweils den aktiven Tab im zuletzt aktiven Firefox-Fenster" : "alle Tabs";
   let description = approval.mode === "ask-session"
     ? `Für ${scope} freigeben: bis zu 12 Stunden ab Freigabe, spätestens bis Firefox neu startet. Diese Frist verlängert sich nicht durch Zugriffe.`
     : approval.mode === "ask-five-days"
       ? `Für ${scope} freigeben: für 5 Tage (120 Stunden) ab Zustimmung, auch nach einem Firefox- oder Erweiterungsneustart. Diese Frist verlängert sich nicht durch Zugriffe. Nach Ablauf wird erneut gefragt.`
-      : `Nur diese Anfrage für ${scope} freigeben. Bei der nächsten Inhaltsanfrage wird erneut gefragt.`;
+      : `Nur diese Anfrage für ${scope} freigeben. Bei der nächsten ${interaction ? "Bedienanfrage" : "Inhaltsanfrage"} wird erneut gefragt.`;
+  if (interaction) description += " Zusätzlich muss eine gültige Inhaltsfreigabe vorliegen; diese kann den Umfang und die Laufzeit weiter einschränken.";
   if (approval.scope === "tab") description += " Andere Tabs und andere URLs benötigen eine eigene Freigabe.";
   if (approval.scope === "tab" && approval.mode === "ask-five-days") description += " Die Freigabe bleibt an diesen Firefox-Tab gebunden. Navigation, Neuladen, Entladen oder Schließen widerruft sie.";
   setText("approvalDescription", description);
@@ -107,6 +114,11 @@ function render(state) {
   el("reconnect").disabled = !settings.enabled;
   el("contentMode").value = settings.contentMode;
   el("contentScope").value = settings.contentScope;
+  el("interactionMode").value = settings.interactionMode || "deny";
+  el("interactionScope").value = settings.interactionScope || "active";
+  setText("interactionSession", Number.isFinite(state.interactionExpiresAt) && state.interactionExpiresAt > Date.now()
+    ? `Bedienfreigabe bis ${new Date(state.interactionExpiresAt).toLocaleString("de-DE")}; zusätzlich durch die Inhaltsfreigabe begrenzt.`
+    : settings.interactionMode && settings.interactionMode !== "deny" ? "Noch keine aktive zeitlich begrenzte Bedienfreigabe." : "Seitenbedienung ist gesperrt.");
   const fiveDays = settings.contentMode === "ask-five-days";
   const expiresAt = fiveDays ? state.fiveDayExpiresAt : state.sessionExpiresAt;
   setText("session", ["ask-session", "ask-five-days"].includes(settings.contentMode)
@@ -130,7 +142,7 @@ async function request(message) {
 async function save(change) {
   if (!settings || updating) return;
   updating = true; statusRequestId += 1;
-  for (const id of ["toggle", "contentMode", "contentScope"]) el(id).disabled = true;
+  for (const id of ["toggle", "contentMode", "contentScope", "interactionMode", "interactionScope"]) el(id).disabled = true;
   try {
     const state = await browser.runtime.sendMessage({ type: "bridge_settings", settings: { ...settings, ...change } });
     statusRequestId += 1; updating = false; render(state);
@@ -138,12 +150,14 @@ async function save(change) {
   finally {
     updating = false;
     await request({ type: "bridge_status" });
-    for (const id of ["toggle", "contentMode", "contentScope"]) el(id).disabled = false;
+    for (const id of ["toggle", "contentMode", "contentScope", "interactionMode", "interactionScope"]) el(id).disabled = false;
   }
 }
 el("toggle").addEventListener("click", () => save({ enabled: !settings.enabled }));
 el("contentMode").addEventListener("change", event => save({ contentMode: event.target.value }));
 el("contentScope").addEventListener("change", event => save({ contentScope: event.target.value }));
+el("interactionMode").addEventListener("change", event => save({ interactionMode: event.target.value }));
+el("interactionScope").addEventListener("change", event => save({ interactionScope: event.target.value }));
 el("reconnect").addEventListener("click", () => request({ type: "bridge_reconnect" }));
 el("openSetup").addEventListener("click", async () => {
   try { await browser.runtime.openOptionsPage(); }

@@ -278,7 +278,7 @@ async function unixUnregisterFixture(t, { registered = true, foreign = false, cl
   await mkdir(join(newRoot, 'scripts'), { recursive: true });
   if (registered) await writeFile(registrationPath, JSON.stringify({ name: foreign ? 'another.application' : 'de.codex.firefox_bridge', type: 'stdio', allowed_extensions: ['firefox-codex-mcp@local.invalid'], path: join(oldRoot, '.local', 'native-host.sh') }));
   await writeFile(join(newRoot, 'scripts', 'client-config.mjs'), `import {writeFileSync} from 'node:fs'; export async function configureClients(options) { writeFileSync(process.env.FIREFOX_MCP_TEST_CALLED, JSON.stringify(options)); return []; }`);
-  const shell = await readFile(join(project, 'scripts/templates/unregister.sh'), 'utf8');
+  const shell = (await readFile(join(project, 'scripts/templates/unregister.sh'), 'utf8')).replace(/\r\n/g, '\n');
   const code = shell.split("<<'FIREFOX_DEREGISTER_JS'\n")[1].split('\nFIREFOX_DEREGISTER_JS')[0]
     .replace('const home = homedir();', 'const home = process.env.FIREFOX_MCP_TEST_HOME;')
     .replaceAll("process.platform === 'darwin'", 'false').replaceAll("process.platform === 'linux'", 'true');

@@ -46,9 +46,16 @@ async function mount({ os = 'linux', saved = {}, write = null, platformError = f
     resetApprovals() {}
     async getCurrentWindow() { return { id: 7, type: 'normal' }; }
   }
+  class InteractionAccess {
+    constructor() { this.settings = { enabled: true, contentMode: 'deny', contentScope: 'active' }; }
+    setSettings(value) { this.settings = { enabled: value.enabled ?? true, contentMode: value.interactionMode || 'deny', contentScope: value.interactionScope || 'active' }; }
+    async restoreApprovals() {}
+    async flushApprovals() {}
+    resetApprovals() {}
+  }
   const realm = vm.createContext({
     browser, crypto: webcrypto, AbortController,
-    FirefoxBridgePolicy: { ContentAccess, normalizeSettings: value => ({ ...defaults, ...value }), iconStatus: value => ({ color: value.enabled && value.connected ? 'green' : 'gray', label: value.enabled && value.connected ? 'Connected' : 'Disconnected' }) },
+    FirefoxBridgePolicy: { ContentAccess, InteractionAccess, normalizeSettings: value => ({ ...defaults, ...value }), iconStatus: value => ({ color: value.enabled && value.connected ? 'green' : 'gray', label: value.enabled && value.connected ? 'Connected' : 'Disconnected' }) },
     FirefoxBridgeCore: { VERSION: '1.0.2', validate() {}, errorData: error => ({ code: error.code || 'ERROR', message: error.message }), createService() {
       return { ready: Promise.resolve(), clearExports() {}, clearHistorySnapshots() {}, async handle(method) {
         calls++;

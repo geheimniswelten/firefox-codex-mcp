@@ -1,6 +1,6 @@
 # Firefox ↔ Codex MCP
 
-Der lokale Stand **1.0.6** korrigiert die Skript-Downloads und die Einrichtung nach einem Pfadwechsel. Die oben verlinkte signierte XPI hat noch den Stand **1.0.5**. Zum Prüfen der Korrektur die lokale `extension/manifest.json` temporär laden bzw. neu laden; das aktualisierte Paket in `dist` ist unsigniert.
+Der Entwicklungsstand **1.0.7** ergänzt strukturierten DOM-Zugriff und getrennt freigegebene Seitenbedienung. Freie JavaScript-Ausführung ist nicht verfügbar. Die neu gebauten ZIPs in `dist` sind unsigniert; zum Testen die lokale `extension/manifest.json` temporär laden. Für dauerhafte Installation die neue Version zunächst bei Mozilla signieren lassen. Die bereits installierte XPI 1.0.6 enthält diese Funktionen noch nicht.
 
 Firefox-Erweiterung und lokaler MCP-Server für die vorhandenen Firefox-Fenster, Tabs, nativen Tabgruppen, installierten Erweiterungen, Chronik, Lesezeichen und Seiteninhalte. Die Verbindung nutzt Firefox Native Messaging, einen ausschließlich an `127.0.0.1` gebundenen Host mit Zugriffstoken und MCP über Standard-Ein-/Ausgabe. Es ist kein OpenAI-API-Schlüssel nötig.
 
@@ -115,6 +115,8 @@ Dokumentation der Konfigurationsformate: [Codex](https://learn.chatgpt.com/docs/
 
 ## Symbolleiste und Zugriffsregeln
 
+Ab Entwicklungsstand **1.0.7** liest `firefox_read_dom` sichtbaren Text und strukturierte Eingaben, Checkboxen, Auswahlfelder, Buttons und Links. `firefox_interact` bedient zuvor ausgelesene Elemente mit `fill`, `set_checked`, `select` oder `click`. Die zusätzliche Popup-Regel **„Seitenelemente bedienen“** ist standardmäßig gesperrt und erlaubt höchstens feste 12 Stunden oder fünf Tage; normales Lesen und Bedienung müssen beide freigegeben sein. Freie JavaScript-Ausführung wird nicht angeboten. Beispiele und Grenzen: [DOM-Zugriff](docs/DOM-access.md).
+
 Das Popup bietet einen MCP-Ein-/Ausschalter, den Verbindungsstatus und die Inhaltsregeln. Die Farbe des Symbols bedeutet:
 
 | Farbe | Bedeutung |
@@ -148,7 +150,7 @@ Für künftig geplante Interaktions- und Debugfunktionen bildet die normale Inha
 
 ## Werkzeuge
 
-Alle 33 Werkzeugnamen haben das Präfix `firefox_`:
+Alle 35 Werkzeugnamen haben das Präfix `firefox_`:
 
 | Bereich | Namen ohne Präfix |
 | --- | --- |
@@ -160,6 +162,7 @@ Alle 33 Werkzeugnamen haben das Präfix `firefox_`:
 | Fenster | `create_window`, `update_window`, `close_window` |
 | Native Gruppen | `list_groups`, `group_tabs`, `ungroup_tabs`, `update_group`, `move_group` |
 | Seiteninhalt | `read_content` |
+| DOM lesen und Seitenelemente bedienen | `read_dom`, `interact` |
 | Auf Seitenzustand warten | `wait_for` |
 | Seitenexport | `save_png`, `save_html`, `save_pdf` |
 

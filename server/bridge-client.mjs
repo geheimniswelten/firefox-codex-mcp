@@ -117,7 +117,7 @@ export function createBridgeClient({ port, token }, { timeoutMs = 35_000, conten
         const timer = setTimeout(() => {
           finish(new BridgeError('BRIDGE_TIMEOUT', 'Firefox did not respond in time. The action may have completed; inspect the current state before retrying a change.'));
           req.destroy();
-        }, method === 'wait_for' ? waitTimeoutMs(params) + 10_000 : method === 'read_content' ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(method) ? exportTimeoutMs : timeoutMs);
+        }, method === 'wait_for' ? waitTimeoutMs(params) + 10_000 : method === 'interact' ? exportTimeoutMs : ['read_content','read_dom'].includes(method) ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(method) ? exportTimeoutMs : timeoutMs);
         const onAbort = () => {
           finish(new BridgeError('CANCELLED', 'The request was cancelled. Firefox may already have applied the action; inspect the current state before retrying.'));
           req.destroy();

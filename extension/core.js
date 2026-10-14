@@ -1,7 +1,7 @@
 ﻿/* Shared as a plain background script and a side-effect module in Node tests. */
 (() => {
   "use strict";
-  const VERSION = "1.0.6";
+  const VERSION = "1.0.7";
   const SESSION_KEY = "firefox-codex-mcp.metadata.v1";
   const MAX_RESPONSE_BYTES = 800000; // Leave room for the native RPC envelope.
   const COLORS = ["blue", "cyan", "grey", "green", "orange", "pink", "purple", "red", "yellow"];
@@ -31,6 +31,8 @@
     list_groups: ["windowId"], group_tabs: ["tabIds", "groupId", "windowId", "title", "color", "collapsed"],
     ungroup_tabs: ["tabIds"], update_group: ["groupId", "title", "color", "collapsed"], move_group: ["groupId", "windowId", "index"],
     read_content: ["tabId", "format", "selector", "maxChars", "includeLinks"],
+    read_dom: ["tabId", "selector", "visibleOnly", "limit", "offset", "maxChars"],
+    interact: ["tabId", "documentId", "elementId", "action", "value", "checked"],
     wait_for: ["tabId", "url", "selector", "imagesLoaded", "fontsLoaded", "loadComplete", "timeoutMs"],
     save_png: ["tabId", "fullPage", "loadDeferred", "maxHeight"], save_html: ["tabId", "loadDeferred"], save_pdf: ["tabId"],
     export_chunk: ["transferId", "index"], export_release: ["transferId"]
@@ -45,6 +47,10 @@
     if (!own(METHODS, method)) throw new BridgeError("METHOD_NOT_FOUND", "Unbekannte Firefox-Methode.");
     if (!p || typeof p !== "object" || Array.isArray(p)) fail("params muss ein Objekt sein.");
     for (const key of Object.keys(p)) if (!METHODS[method].includes(key)) fail(`Unbekannter Parameter: ${key}`);
+    if (["read_dom", "interact"].includes(method)) {
+      if (!globalThis.FirefoxBridgeDom) throw new BridgeError("UNSUPPORTED", "DOM-Zugriff benötigt die aktualisierte Firefox-Erweiterung.");
+      globalThis.FirefoxBridgeDom.validate(method, p); return;
+    }
     if (method === "search_history") {
       if (!globalThis.FirefoxBridgeHistory) throw new BridgeError("UNSUPPORTED", "Chroniksuche benötigt die aktualisierte Firefox-Erweiterung.");
       globalThis.FirefoxBridgeHistory.validate(p); return;
@@ -246,6 +252,7 @@
     const searchOptions = { now: options.now, workerFactory: options.searchWorkerFactory || (() => new Worker(browser.runtime.getURL("tab-search-worker.js"))) };
     const history = globalThis.FirefoxBridgeHistory?.createHistory(browser, searchOptions);
     const bookmarks = globalThis.FirefoxBridgeBookmarks?.createBookmarks(browser, searchOptions);
+    const dom = globalThis.FirefoxBridgeDom?.createDom(browser, options);
     const exporting = new Set();
     const ready = tracker.start();
     const groupApi = () => {
@@ -270,6 +277,7 @@
       context.assertLive?.();
       const p = params;
       switch (method) {
+        case "read_dom": case "interact": return dom.handle(method, p, context);
         case "status": {
           const permissions = browser.permissions?.getAll ? await browser.permissions.getAll() : {};
           const technicalAllowed = permissions.data_collection?.includes("technicalAndInteraction");

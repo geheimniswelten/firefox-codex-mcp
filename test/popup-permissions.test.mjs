@@ -101,6 +101,17 @@ function mount({ granted = false, rejection = null, accepted = true, pendingAppr
   };
 }
 
+test('interaction UI has no unlimited mode and distinguishes writes with plain-text target details', async () => {
+  const select = html.match(/<select id="interactionMode">([\s\S]*?)<\/select>/)[1];
+  assert.ok(!select.includes('value="allow"'));
+  for (const mode of ['deny','ask-every-time','ask-session','ask-five-days']) assert.ok(select.includes(`value="${mode}"`));
+  const f = mount({ pendingApproval: approval({ kind: 'interaction', operation: { action: 'fill', description: '<img onerror=alert(1)>' } }) });
+  await settle();
+  assert.equal(f.el('approvalHeading').textContent, 'Seitenelemente bedienen erlauben?');
+  assert.match(f.el('approvalImpact').textContent, /Eingabe ausfüllen.*<img onerror=alert\(1\)>/);
+  assert.match(f.el('approvalDescription').textContent, /Inhaltsfreigabe/);
+});
+
 test('setup action opens the declared options page without granting access or starting an installer', async () => {
   const popup = mount();
   await settle();

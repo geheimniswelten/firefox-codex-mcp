@@ -1,6 +1,6 @@
 param([string]$ProjectRoot, [switch]$NoRegisterClients, [switch]$Help)
 $ErrorActionPreference = 'Stop'
-# Companion version: 1.0.6; registration revision: 1.
+# Companion version: 1.0.7; registration revision: 1.
 # Shared source for the standalone Windows downloads. ASCII for PowerShell 5.1.
 function Get-FirefoxInstalledRoot {
     try {
