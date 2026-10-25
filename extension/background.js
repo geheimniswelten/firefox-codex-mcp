@@ -14,6 +14,7 @@
   let platform = null, setupMetadata = null, metadataError = null, lastConfirmation = null;
   let confirmationWrites = Promise.resolve();
   let queue = Promise.resolve();
+  let siteRuleWrites = Promise.resolve(), siteRulesRevision = 0, siteRulesError = null;
   const waits = new Map();
   const activeRequests = new Set(), FRAME_MS = 240, MIN_ACTIVITY_MS = 800, QUIET_MS = 200, RECENT_DOTS_MS = 10000;
   let activityTimer = null, activityFrame = 0, activityUntil = 0, wasAnimating = false;
@@ -77,7 +78,7 @@
   function clearHandshakeTimer() { if (handshakeTimer) clearTimeout(handshakeTimer); handshakeTimer = null; }
   function publicState() {
     if (prompt && Date.now() >= prompt.expiresAt) finishPrompt(false, prompt);
-    return { ...state, lastError: state.lastError || metadataError, setup: setupState(), settings: combinedSettings(), interactionExpiresAt: interactions.expiresAt, sessionExpiresAt: policy.settings.contentMode === "ask-session" ? policy.expiresAt : null, fiveDayExpiresAt: policy.settings.contentMode === "ask-five-days" ? policy.expiresAt : null, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
+    return { ...state, lastError: state.lastError || metadataError, setup: setupState(), settings: combinedSettings(), siteRules: policy.siteRules || { blocked: [], fullAccess: [], readOnly: [] }, siteRulesRevision, siteRulesError, interactionExpiresAt: interactions.expiresAt, sessionExpiresAt: policy.settings.contentMode === "ask-session" ? policy.expiresAt : null, fiveDayExpiresAt: policy.settings.contentMode === "ask-five-days" ? policy.expiresAt : null, icon: iconStatus({ ...state, enabled: policy.settings.enabled }), pendingApproval: prompt ? { ...prompt.request, id: prompt.id, expiresAt: prompt.expiresAt } : null };
   }
   function setToolbarIcon(path) {
     wantedIcon = path;
@@ -278,8 +279,29 @@
     if (sender.id !== browser.runtime.id || !message || typeof message !== "object") return undefined;
     const fromPopup = sender.url === browser.runtime.getURL("popup.html");
     const fromSetup = sender.url === browser.runtime.getURL("setup/setup.html");
-    if (!fromPopup && !fromSetup) return undefined;
+    const fromSiteRules = sender.url === browser.runtime.getURL("site-rules.html");
+    if (!fromPopup && !fromSetup && !fromSiteRules) return undefined;
     if (fromSetup && !["bridge_status", "bridge_reconnect"].includes(message.type)) return undefined;
+    if (fromSiteRules && !["bridge_status", "bridge_site_rules"].includes(message.type)) return undefined;
+    if (message.type === "bridge_site_rules") {
+      if (!fromSiteRules) return undefined;
+      return startup.then(() => {
+        const save = siteRuleWrites.then(async () => {
+          if (!Number.isSafeInteger(message.revision) || message.revision !== siteRulesRevision) throw new Error("Die Seitenfilter wurden inzwischen geändert. Bitte neu laden und die Änderungen erneut übernehmen.");
+          const rules = FirefoxBridgePolicy.normalizeSiteRules(message.siteRules);
+          // A failed storage write must never enable a new permanent exception.
+          await browser.storage.local.set({ bridgeSiteRules: rules });
+          policy.setSiteRules(rules); interactions.setSiteRules(rules);
+          siteRulesRevision++; siteRulesError = null;
+          policy.resetApprovals(); interactions.resetApprovals(); service.clearExports?.(); finishPrompt(false);
+          badge(); notifyPopup();
+          await Promise.all([policy.flushApprovals(), interactions.flushApprovals()]);
+          return publicState();
+        });
+        siteRuleWrites = save.catch(() => {});
+        return save;
+      });
+    }
     if (message.type === "approval_answer") {
       const current = prompt;
       if (!current || !promptIsCurrent(current) || message.id !== current.id || typeof message.allowed !== "boolean") return Promise.resolve({ ok: false });
@@ -305,7 +327,7 @@
   });
   const startup = (async () => {
     const [saved, platformInfo] = await Promise.all([
-      browser.storage.local.get(["bridgeSettings", CONFIRMATION_KEY]),
+      browser.storage.local.get(["bridgeSettings", "bridgeSiteRules", CONFIRMATION_KEY]),
       Promise.resolve().then(() => browser.runtime.getPlatformInfo?.()).catch(() => null),
     ]);
     platform = ["win", "linux", "mac"].includes(platformInfo?.os) ? platformInfo.os : null;
@@ -314,6 +336,10 @@
     if (previousMetadata?.registration && isoTime(previous.verifiedAt)) lastConfirmation = { ...previousMetadata, verifiedAt: previous.verifiedAt };
     policy.setSettings(saved.bridgeSettings || {}, { persist: false });
     interactions.setSettings(saved.bridgeSettings || {}, { persist: false });
+    if (saved.bridgeSiteRules !== undefined) {
+      try { policy.setSiteRules(saved.bridgeSiteRules, { persist: false }); interactions.setSiteRules(saved.bridgeSiteRules, { persist: false }); }
+      catch (error) { policy.failSiteRules(); interactions.failSiteRules(); siteRulesError = String(error.message || error); }
+    }
     await Promise.all([policy.restoreApprovals(), interactions.restoreApprovals()]);
     await service.ready;
     connect(); badge();

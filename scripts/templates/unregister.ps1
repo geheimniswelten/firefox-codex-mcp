@@ -47,6 +47,7 @@ try {
         } catch { Write-Warning ('Native Host deregistered; registration receipt was kept: ' + $_.Exception.Message); $partial = $true }
     }
     Write-Host 'Native Host deregistered. Companion files and settings are kept.'
+    if ($root) { Write-Host ('Installation directory kept: ' + $root) }
     if (-not $NoRegisterClients) {
         try {
             $registrar = $null

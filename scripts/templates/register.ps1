@@ -63,11 +63,16 @@ function Expand-FirefoxSetupPayload {
 
 if ($Help) {
     Write-Host 'register.ps1 [-ProjectRoot ABSOLUTE_DIRECTORY] [-NoDownload] [-NoRegisterClients] [-Port 38477]'
-    Write-Host 'Self-contained companion setup. Existing source files in the selected directory are updated.'
+    Write-Host 'Installs/updates a local Node.js MCP server and native host, then registers Firefox and supported AI clients.'
+    Write-Host 'Server and npm dependencies: about 22 MB, plus Node.js if downloaded. Existing server/setup source files may be replaced.'
     exit 0
 }
 try {
+    Write-Host 'This script installs/updates a local Node.js MCP server and native host, then registers them.'
+    Write-Host 'Server and npm dependencies: about 22 MB. A downloaded Node.js runtime requires additional space.'
+    Write-Host 'Existing server and setup source files in the selected directory may be replaced.'
     $root = Get-FirefoxSetupRoot -RequestedRoot $ProjectRoot
+    Write-Host ('Selected installation directory: ' + $root)
     Expand-FirefoxSetupPayload -Root $root
     $arguments = @{ NoOpenFirefox = $true }
     if ($NoDownload) { $arguments.NoDownload = $true }

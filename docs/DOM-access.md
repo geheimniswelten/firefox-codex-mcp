@@ -1,4 +1,4 @@
-# DOM lesen und bedienen (Entwicklungsstand 1.0.7)
+# DOM lesen und bedienen (Entwicklungsstand 1.0.8)
 
 `firefox_read_dom` liest sichtbaren Text und Eingaben, Checkboxen, Radio-Buttons,
 Auswahlfelder, Buttons, Links und explizit editierbare Bereiche. Es liefert
@@ -28,6 +28,11 @@ Neuladen, Austausch des Knotens oder Verdrängung aus dem begrenzten Referenzspe
 muss erneut gelesen werden. Das schützt auch vor einem Neuladen mit gleicher URL.
 
 ## Freigaben
+
+Ab 1.0.8 werden zuerst die [dauerhaften Seitenfilter](Seitenfilter.md) geprüft.
+Sperren verhindern Lesen und Bedienung. Die Leseliste umgeht Inhaltsfreigaben,
+Bedienung bleibt gesondert freigabepflichtig. Vollzugriff umgeht beide Freigaben.
+Ohne passenden Filter gelten die folgenden normalen Regeln:
 
 - Lesen verwendet die normale Inhaltsfreigabe.
 - Schreiben benötigt zusätzlich **Seitenelemente bedienen**, standardmäßig gesperrt.

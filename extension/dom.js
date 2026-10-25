@@ -127,8 +127,11 @@
     return { async handle(method, p, context = {}) {
       const writing = method === "interact";
       if (!contentAccess) throw error("CONTENT_DENIED", "DOM-Zugriff benötigt die Inhaltsfreigabe.");
-      if (writing && (!interactionAccess || interactionAccess.settings.contentMode === "deny")) throw error("INTERACTION_DENIED", "Seitenelemente bedienen ist in der Erweiterung gesperrt.");
+      if (writing && !interactionAccess) throw error("INTERACTION_DENIED", "Seitenelemente bedienen ist in der Erweiterung gesperrt.");
       let tab = await browser.tabs.get(p.tabId);
+      // Never inspect an element for a write prompt before checking hard site denials.
+      contentAccess.assertSiteAllowed(tab.url);
+      if (writing && interactionAccess.settings.contentMode === "deny" && !interactionAccess.siteBypass(tab.url)) throw error("INTERACTION_DENIED", "Seitenelemente bedienen ist in der Erweiterung gesperrt.");
       if (tab.discarded) throw error("TAB_DISCARDED", "Der Tab ist entladen. Zuerst ausdrücklich reload_tabs aufrufen.");
       if (!/^https?:\/\//i.test(tab.url || "")) throw error("RESTRICTED_PAGE", "DOM-Zugriff ist nur auf HTTP(S)-Seiten möglich.");
       const url = tab.url, readRevision = contentAccess.revision, writeRevision = interactionAccess?.revision;
@@ -159,7 +162,7 @@
       // Authorizations are checked again immediately before injection. Document
       // IDs prevent even same-URL reloads from reusing old element references.
       for (const [access, revision] of [[contentAccess,readRevision], ...(writing ? [[interactionAccess,writeRevision]] : [])]) {
-        if (!access.settings.enabled || access.revision !== revision || access.settings.contentMode === "deny") throw error("PERMISSION_CHANGED", "Die Freigabe wurde vor der Bedienung geändert.");
+        if (!access.settings.enabled || access.revision !== revision || access.settings.contentMode === "deny" && !access.siteBypass(url)) throw error("PERMISSION_CHANGED", "Die Freigabe wurde vor der Bedienung geändert.");
       }
       const expires = access => {
         const grant = access.authorizations.get(access === contentAccess ? readAuthorization : writeAuthorization);

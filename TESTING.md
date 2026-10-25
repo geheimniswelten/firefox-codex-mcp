@@ -1,4 +1,51 @@
-# Prüfstand vom 12. Oktober 2026
+# Prüfstand vom 22. Oktober 2026
+
+## Dauerhafte Seitenfilter (1.0.8)
+
+Die Einrichtungsseite erklärt jetzt die lokale Node.js-Installation (rund 22 MB
+für Server/npm-Abhängigkeiten, zusätzliche Laufzeit bei Bedarf), frische
+Standardpfade, Wiederverwendung des bestehenden Registrierungsordners und den
+Erhalt der Installationsdateien bei Unregister. **38 Einrichtungs-/Download-/
+Deinstallationsprüfungen bestanden, 1 bekannte Windows-Symlink-Prüfung übersprungen**.
+Bestätigte Installationspfade werden getrennt von Standardpfaden dargestellt;
+historische Bestätigungen werden dabei nicht als aktuelle Installation ausgegeben.
+
+Ergänzung zur URL-Kodierung: **54 betroffene Tests bestanden** nach Anpassung
+des Pfadvergleichs. Leerzeichen/`%20`, UTF-8/Umlaute und unreservierte Zeichen
+werden in beiden Richtungen erkannt; Hex-Groß-/Kleinschreibung ist unerheblich.
+Kodierte Pfadtrenner und literale Sterne erweitern die Filter nicht; `%2520`
+wird nicht doppelt dekodiert. Die Einstellungsseite bewahrt abschließende
+Pfad-Leerzeichen beim Speichern als `%20`.
+
+Der vollständige Lauf mit `node --test --test-concurrency=2 test/*.test.mjs`
+bestand mit **456 bestanden, 0 fehlgeschlagen, 2 bedingt übersprungen
+(458 insgesamt)**. Die bekannten Windows-ACL-/Dateisymlink-Ausnahmen bleiben bestehen.
+`node scripts/check.mjs` bestätigte die Syntax von **130 JavaScript-Dateien**
+und das Manifest.
+
+Neue Prüfungen decken Domain-/Hostgrenzen, Punycode, URL-Pfadgrenzen, ignorierte
+Querys/Fragmente, ausdrückliche Platzhalter, Protokolle/Ports, ungültige Eingaben,
+Sperrvorrang, reine Lesefreigaben mit normaler Bedienfreigabe, Vollzugriff,
+Navigation/Widerruf, globale Deaktivierung und gesperrte eingebettete Seiten ab.
+Speichern erfolgt nur über die genaue Erweiterungs-Einstellungsseite, nach
+Validierung und erfolgreichem Speichervorgang; konkurrierende Editoren werden
+über Revisionen erkannt. Neustart, korrupte gespeicherte Regeln, fehlgeschlagene
+Speicherung und die interaktive Einstellungsseite sind ebenfalls abgedeckt.
+
+`node scripts/test-dom-firefox.mjs` bestand mit **Firefox 158.0.1** und
+**33 Prüfungen** im eigenen unsichtbaren Profil. Zusätzlich zu den bisherigen
+DOM-Operationen wurden Lesen/Vollzugriff trotz allgemeiner Sperre, normale
+Bedienverweigerung bei Lesefreigabe, Sperren vor DOM-Zugriff, weiterhin verfügbare
+Tab-URL-Metadaten und Abbruch von PNG/HTML/PDF bei einem gesperrten IFrame bestätigt.
+Das Benutzerprofil und dessen Native Host wurden nicht verändert. Die Testseite
+wird erst nach Erreichen ihrer erwarteten URL und abgeschlossenem Laden geprüft.
+Nach der zusätzlichen Absicherung gegen IFrame-Navigationen bestanden die
+**59 betroffenen Policy-/DOM-/Export-/Hintergrundtests** und der echte Firefox-Lauf
+erneut. Der lokale AMO-Linter meldet **0 Fehler, 0 Hinweise und 3 bekannte Warnungen**:
+Android-Mindestversion für `data_collection_permissions` sowie die absichtlich
+enthaltenen `setup/register.sh` und `setup/unregister.sh`.
+
+## Bisheriger Prüfstand vom 12. Oktober 2026
 
 ## DOM-Zugriff und getrennte Bedienfreigabe (1.0.7)
 

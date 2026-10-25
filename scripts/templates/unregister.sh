@@ -59,6 +59,7 @@ try {
   }
 } catch (error) { console.error('Native Host deregistered; registration receipt was kept: ' + error.message); process.exitCode = 2; }
 console.log('Native Host deregistered. Companion files and settings are kept.');
+console.log('Installation directory kept: ' + root);
 if (!process.argv[3]) {
   try {
     const candidates = [join(scriptDirectory, 'scripts/client-config.mjs'), ...(basename(scriptDirectory) === 'scripts' ? [join(scriptDirectory, 'client-config.mjs')] : []), join(root, 'scripts/client-config.mjs')];

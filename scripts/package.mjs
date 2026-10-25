@@ -14,7 +14,7 @@ async function collect(base, directory = base) {
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     if (excluded.has(entry.name) || entry.name.startsWith('.env') || /\.(log|pem|key|pfx)$/iu.test(entry.name)) continue;
     // Local chat exports and previously signed add-ons are not project sources.
-    if (directory === root && (/\.xpi$/iu.test(entry.name) || /^Chat - .*\.md$/iu.test(entry.name))) continue;
+    if (directory === root && (/\.(xpi|7z)$/iu.test(entry.name) || /^Chat - .*\.md$/iu.test(entry.name))) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...await collect(base, path));
     else if (entry.isFile()) files.push({ name: relative(base, path).split(sep).join('/'), data: await readFile(path) });

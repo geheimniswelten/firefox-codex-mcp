@@ -7,6 +7,92 @@
   const isUuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
   const DEFAULTS = Object.freeze({ enabled: true, contentMode: "ask-session", contentScope: "active" });
   const accessError = (code, message) => Object.assign(new Error(message), { code });
+  const RULE_KEYS = ["blocked", "fullAccess", "readOnly"];
+  // Match literal segments instead of evaluating user-controlled regular expressions.
+  function wildcard(pattern, text) {
+    const parts = pattern.split("*");
+    if (parts.length === 1) return text === pattern;
+    if (!text.startsWith(parts[0]) || !text.endsWith(parts.at(-1))) return false;
+    let offset = parts[0].length;
+    const end = text.length - parts.at(-1).length;
+    for (const part of parts.slice(1, -1)) {
+      const found = text.indexOf(part, offset);
+      if (found < 0 || found + part.length > end) return false;
+      offset = found + part.length;
+    }
+    return offset <= end;
+  }
+  const cleanHost = value => value.toLowerCase().replace(/\.$/u, "");
+  function normalizePathEncoding(path, { pattern = false } = {}) {
+    // Keep reserved separators encoded: decoding %2F or %26 would widen a rule.
+    // Encoded asterisks are literals; only actual '*' characters in rules are globs.
+    let escaped = path.replace(/ /gu, "%20");
+    if (!pattern) escaped = escaped.replace(/\*/gu, "%2A");
+    return escaped.replace(/%([0-9a-f]{2})/giu, (_value, hex) => {
+      const char = String.fromCharCode(parseInt(hex, 16));
+      return /^[a-z0-9._~-]$/iu.test(char) ? char : `%${hex.toUpperCase()}`;
+    });
+  }
+  function normalizeHost(value) {
+    const host = cleanHost(value);
+    if (!host || /[\s/@?#&\\]/u.test(host) || host.includes("..") || host.includes(":") && !/^\[[0-9a-f:.]+\]$/iu.test(host)) throw accessError("INVALID_SITE_RULE", `Ungültige Domain: ${value}`);
+    if (host.includes("*")) {
+      if (!/^[a-z0-9.*-]+$/u.test(host)) throw accessError("INVALID_SITE_RULE", `Ungültiger Domain-Platzhalter: ${value}`);
+      return host;
+    }
+    let parsed;
+    try { parsed = new URL(`http://${host}/`); } catch { /* Invalid host. */ }
+    if (!parsed || parsed.port || parsed.username || parsed.password || parsed.pathname !== "/") throw accessError("INVALID_SITE_RULE", `Ungültige Domain: ${value}`);
+    return cleanHost(parsed.hostname);
+  }
+  function normalizeSiteRule(rule) {
+    if (!rule || typeof rule !== "object" || Array.isArray(rule) || Object.keys(rule).some(key => !["type", "value"].includes(key)) || !["domain", "host", "url"].includes(rule.type)
+      || typeof rule.value !== "string" || !rule.value.trim() || rule.value.length > 2048 || /[\u0000-\u001f\u007f]/u.test(rule.value)) throw accessError("INVALID_SITE_RULE", "Ein Filter benötigt einen Typ und eine Domain oder URL mit höchstens 2048 Zeichen.");
+    const value = rule.type === "url" ? rule.value.trimStart() : rule.value.trim();
+    if (rule.type !== "url") return { type: rule.type, value: normalizeHost(value) };
+    const match = /^(?:(https?|\*):\/\/)?([^/?&#]+)(\/[^?&#]*)?(?:[?&#].*)?$/iu.exec(value);
+    const authority = match && /^(\[[0-9a-f:.]+\]|[^:]+)(?::(\*|[0-9]{1,5}))?$/iu.exec(match[2]);
+    if (!authority) throw accessError("INVALID_SITE_RULE", `Ungültiges URL-Muster: ${value}`);
+    const host = normalizeHost(authority[1]), port = authority[2];
+    if (port !== undefined && port !== "*" && (Number(port) < 1 || Number(port) > 65535)) throw accessError("INVALID_SITE_RULE", `Ungültiger Port: ${value}`);
+    const path = normalizePathEncoding(new URL(`http://example.invalid${(match[3] || "/").replace(/ /gu, "%20")}`).pathname, { pattern: true }).replace(/\/+$/u, "") || "/";
+    return { type: "url", value: `${match[1] ? match[1].toLowerCase() + "://" : ""}${host}${port === undefined ? "" : ":" + (port === "*" ? "*" : Number(port))}${path}` };
+  }
+  function compileSitePattern(rule) {
+    const normalized = normalizeSiteRule(rule);
+    if (normalized.type !== "url") return url => {
+      let host = cleanHost(url.hostname);
+      if (wildcard(normalized.value, host)) return true;
+      if (normalized.type === "host" || host.startsWith("[")) return false;
+      while (host.includes(".")) { host = host.slice(host.indexOf(".") + 1); if (wildcard(normalized.value, host)) return true; }
+      return false;
+    };
+    const match = /^(?:(https?|\*):\/\/)?(\[[^\]]+\]|[^/:]+)(?::(\*|[0-9]+))?(\/.*)$/u.exec(normalized.value);
+    const [, scheme, host, port, path] = match;
+    return url => {
+      if (scheme && scheme !== "*" && url.protocol !== `${scheme}:` || !wildcard(host, cleanHost(url.hostname))) return false;
+      const actualPort = url.port || (url.protocol === "https:" ? "443" : "80");
+      if (port && port !== "*" && port !== actualPort || !port && scheme && scheme !== "*" && url.port) return false;
+      if (path === "/") return true;
+      const target = normalizePathEncoding(url.pathname);
+      if (!path.includes("*")) return target === path || target.startsWith(path + "/") || target.startsWith(path + "&");
+      if (wildcard(path, target)) return true;
+      for (let i = 1; i < target.length; i++) if ((target[i] === "/" || target[i] === "&") && wildcard(path, target.slice(0, i))) return true;
+      return false;
+    };
+  }
+  function normalizeSiteRules(value = {}) {
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !RULE_KEYS.includes(key))) throw accessError("INVALID_SITE_RULE", "Die Seitenfilter müssen drei Musterlisten enthalten.");
+    const rules = {};
+    for (const key of RULE_KEYS) {
+      const entries = value[key] ?? [];
+      if (!Array.isArray(entries) || entries.length > 200) throw accessError("INVALID_SITE_RULE", "Pro Liste sind höchstens 200 Filter erlaubt.");
+      const unique = new Map();
+      for (const entry of entries) { const rule = normalizeSiteRule(entry); unique.set(JSON.stringify(rule), rule); }
+      rules[key] = [...unique.values()];
+    }
+    return rules;
+  }
   function normalizeSettings(value = {}) {
     return {
       enabled: typeof value.enabled === "boolean" ? value.enabled : DEFAULTS.enabled,
@@ -55,13 +141,19 @@
     stop() { this.browser.windows.onFocusChanged.removeListener(this.listener); }
   }
   class ContentAccess {
-    constructor(browser, { now = Date.now, requestApproval = async () => false, settings = DEFAULTS, approvalsKey = APPROVALS_KEY, tabApprovalKey = TAB_APPROVAL_KEY, kind = "content" } = {}) {
+    constructor(browser, { now = Date.now, requestApproval = async () => false, settings = DEFAULTS, approvalsKey = APPROVALS_KEY, tabApprovalKey = TAB_APPROVAL_KEY, kind = "content", siteRules = {} } = {}) {
       this.browser = browser; this.now = now; this.requestApproval = requestApproval;
       this.approvalsKey = approvalsKey; this.tabApprovalKey = tabApprovalKey; this.kind = kind;
       this.settings = normalizeSettings(settings); this.revision = 0; this.expiresAt = null; this.promptPending = false;
       this.tabGrants = new Map(); this.tabRevisions = new Map(); this.authorizations = new WeakMap();
+      this.frameRevisions = new Map();
+      browser.webNavigation?.onBeforeNavigate?.addListener(details => {
+        this.frameRevisions.set(details.tabId, (this.frameRevisions.get(details.tabId) || 0) + 1);
+      });
       this.policyEpoch = null; this.globalApproval = null; this.savedTabGrants = new Map(); this.tabTokens = new Map();
       this.persistEnabled = false; this.persistQueue = Promise.resolve(); this.persistFailure = null; this.persistNotice = null;
+      this.siteRules = normalizeSiteRules(siteRules); this.siteRuleFailure = false;
+      this.siteMatchers = Object.fromEntries(RULE_KEYS.map(key => [key, this.siteRules[key].map(compileSitePattern)]));
       const revokeTab = tabId => {
         this.tabGrants.delete(tabId);
         this.tabRevisions.set(tabId, (this.tabRevisions.get(tabId) || 0) + 1);
@@ -69,7 +161,7 @@
         if (token && this.savedTabGrants.delete(token)) this.persistApprovals();
       };
       browser.tabs.onUpdated.addListener((tabId, change) => { if (Object.prototype.hasOwnProperty.call(change, "url") || change.discarded === true || (this.settings.contentMode === "ask-five-days" && change.status === "loading")) revokeTab(tabId); });
-      browser.tabs.onRemoved.addListener(tabId => { revokeTab(tabId); this.tabTokens.delete(tabId); });
+      browser.tabs.onRemoved.addListener(tabId => { revokeTab(tabId); this.tabTokens.delete(tabId); this.frameRevisions.delete(tabId); });
       browser.tabs.onCreated?.addListener(tab => {
         if (this.settings.contentMode !== "ask-five-days" || !this.savedTabGrants.size) return;
         this.browser.sessions?.getTabValue?.(tab.id, this.tabApprovalKey).then(token => {
@@ -79,6 +171,50 @@
       this.windowTracker = new NormalWindowTracker(browser);
     }
     getCurrentWindow() { return this.windowTracker.getCurrent(); }
+    setSiteRules(value, { persist = true } = {}) {
+      const rules = normalizeSiteRules(value);
+      if (this.siteRuleFailure || JSON.stringify(rules) !== JSON.stringify(this.siteRules)) {
+        this.siteRules = rules; this.siteRuleFailure = false;
+        this.siteMatchers = Object.fromEntries(RULE_KEYS.map(key => [key, rules[key].map(compileSitePattern)]));
+        this.resetApprovals({ persist });
+      }
+      return normalizeSiteRules(this.siteRules);
+    }
+    failSiteRules() { this.siteRuleFailure = true; this.resetApprovals({ persist: false }); }
+    siteAccess(value) {
+      if (this.siteRuleFailure) throw accessError("SITE_RULES_UNAVAILABLE", "Die gespeicherten Seitenfilter sind ungültig. Bitte in den Einstellungen korrigieren.");
+      let url;
+      try { url = new URL(value); } catch { return null; }
+      if (!["http:", "https:"].includes(url.protocol)) return null;
+      for (const key of RULE_KEYS) if (this.siteMatchers[key].some(match => match(url))) return key;
+      return null;
+    }
+    assertSiteAllowed(url) {
+      const rule = this.siteAccess(url);
+      if (rule === "blocked") throw accessError("SITE_BLOCKED", "Seiteninhalte sind durch einen Seitenfilter dauerhaft gesperrt.");
+      return rule;
+    }
+    siteBypass(url) {
+      const rule = this.assertSiteAllowed(url);
+      return this.kind === "interaction" ? rule === "fullAccess" : rule === "fullAccess" || rule === "readOnly";
+    }
+    async assertExportFrames(tabId, expectedRevision = this.frameRevisions.get(tabId) || 0) {
+      this.assertSiteAllowed((await this.browser.tabs.get(tabId)).url);
+      if (!this.siteRules.blocked.length) return;
+      const assertUnchanged = () => { if ((this.frameRevisions.get(tabId) || 0) !== expectedRevision) throw accessError("PAGE_CHANGED", "Ein eingebettetes Dokument wurde während des Exports gewechselt. Erneut anfragen."); };
+      assertUnchanged();
+      // Exports include embedded documents, unlike main-frame text/DOM reads.
+      if (!this.browser.webNavigation?.getAllFrames) throw accessError("FRAME_POLICY_UNAVAILABLE", "Eingebettete Seiten können nicht sicher gegen die Sperrliste geprüft werden. Export abgebrochen.");
+      let frames;
+      try { frames = await this.browser.webNavigation.getAllFrames({ tabId }); }
+      catch { throw accessError("FRAME_POLICY_UNAVAILABLE", "Eingebettete Seiten konnten nicht gegen die Sperrliste geprüft werden."); }
+      if (!Array.isArray(frames) || !frames.some(frame => frame.frameId === 0)) throw accessError("FRAME_POLICY_UNAVAILABLE", "Die Seitenstruktur konnte nicht sicher geprüft werden.");
+      for (const frame of frames) {
+        if (typeof frame.url !== "string" || !frame.url) throw accessError("FRAME_POLICY_UNAVAILABLE", "Eine eingebettete URL konnte nicht sicher geprüft werden.");
+        this.assertSiteAllowed(frame.url);
+      }
+      assertUnchanged();
+    }
     setSettings(settings, { persist = true } = {}) {
       const next = normalizeSettings(settings);
       if (JSON.stringify(this.settings) !== JSON.stringify(next)) {
@@ -216,11 +352,12 @@
     async assertTarget(tabId, expectedUrl, revision) {
       if (!this.settings.enabled) throw accessError("MCP_DISABLED", "MCP-Zugriff ist deaktiviert.");
       if (revision !== this.revision) throw accessError("PERMISSION_CHANGED", "Die Zugriffseinstellungen wurden während der Anfrage geändert.");
-      if (this.settings.contentMode === "ask-five-days" && this.persistFailure) throw this.persistFailure;
       const tab = await this.browser.tabs.get(tabId);
       if (tab.url !== expectedUrl) throw accessError("PAGE_CHANGED", "Die Tab-URL hat sich während der Freigabe geändert. Erneut anfragen.");
       if (tab.discarded) throw accessError("TAB_DISCARDED", "Der Tab wurde entladen. Zuerst ausdrücklich reload_tabs aufrufen.");
       if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Zugriffseinstellungen wurden während der Anfrage geändert.");
+      const bypass = this.siteBypass(tab.url);
+      if (!bypass && this.settings.contentMode === "ask-five-days" && this.persistFailure) throw this.persistFailure;
       return tab;
     }
     async isActiveTab(tabId) {
@@ -247,6 +384,11 @@
     async assertScope(tabId, expectedUrl, revision = this.revision, authorization) {
       const tab = await this.assertTarget(tabId, expectedUrl, revision);
       const grant = this.authorizations.get(authorization);
+      if (grant?.siteRule) {
+        this.assertGrant(grant, tabId, expectedUrl, revision);
+        if (!this.siteBypass(expectedUrl)) throw accessError("PERMISSION_CHANGED", "Der Seitenfilter wurde geändert.");
+        return tab;
+      }
       if (grant) {
         this.assertGrant(grant, tabId, expectedUrl, revision);
         if (grant.token) await this.assertTabIdentity(grant);
@@ -266,6 +408,10 @@
       const revision = this.revision, tabRevision = this.tabRevisions.get(tab.id) || 0;
       await this.assertTarget(tab.id, tab.url, revision);
       assertPending();
+      if (this.siteBypass(tab.url)) {
+        this.authorizations.set(authorization, { tabId: tab.id, url: tab.url, revision, tabRevision, expiresAt: null, siteRule: true });
+        const current = await this.assertScope(tab.id, tab.url, revision, authorization); assertPending(); return current;
+      }
       const mode = this.settings.contentMode;
       const finiteMode = mode === "ask-session" || mode === "ask-five-days";
       if (mode === "deny") throw accessError("CONTENT_DENIED", "Inhaltszugriff ist in der Erweiterung gesperrt.");
@@ -336,6 +482,7 @@
       if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Freigabe wurde während der Anfrage widerrufen.");
       const grant = this.authorizations.get(authorization);
       if (grant) this.assertGrant(grant, tabId, url, revision);
+      if (grant?.siteRule) return tab;
       if (this.settings.contentMode === "deny") throw accessError("CONTENT_DENIED", "Inhaltszugriff wurde gesperrt.");
       if (!this.authorizations.has(authorization) && ["ask-session", "ask-five-days"].includes(this.settings.contentMode) && (this.expiresAt === null || this.now() >= this.expiresAt)) throw accessError("SESSION_EXPIRED", "Die Inhaltsfreigabe ist während des Auslesens abgelaufen. Erneut anfragen.");
       return tab;
@@ -353,5 +500,5 @@
     }
     setSettings(value, options) { return super.setSettings(normalizeInteractionSettings(value), options); }
   }
-  globalThis.FirefoxBridgePolicy = { SESSION_MS, FIVE_DAYS_MS, DEFAULTS, normalizeSettings, normalizeInteractionSettings, iconStatus, NormalWindowTracker, ContentAccess, InteractionAccess };
+  globalThis.FirefoxBridgePolicy = { SESSION_MS, FIVE_DAYS_MS, DEFAULTS, normalizeSettings, normalizeInteractionSettings, normalizeSiteRules, compileSitePattern, iconStatus, NormalWindowTracker, ContentAccess, InteractionAccess };
 })();

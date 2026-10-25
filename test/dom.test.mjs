@@ -58,6 +58,25 @@ test('DOM reads visible text, controls, state, link targets and redacts password
   const page=await f.dom.handle('read_dom',{tabId:1,limit:2,offset:2,maxChars:3,visibleOnly:false});
   assert.equal(page.returned,2);assert.equal(page.nextOffset,4);assert.equal(page.text.length,3);assert.equal(page.textTruncated,true);
 });
+
+test('permanent site rules enforce denial before injection and full access bypasses both general deny modes', async t => {
+  const f = fixture(t, { readMode: 'deny', writeMode: 'deny' });
+  const rules = { readOnly: [{ type: 'domain', value: 'example.test' }] };
+  f.read.setSiteRules(rules); f.write.setSiteRules(rules);
+  const snapshot = await f.snapshot();
+  await assert.rejects(f.action(snapshot, f.element(snapshot, 'Name'), 'fill', { value: 'forbidden' }), { code: 'INTERACTION_DENIED' });
+  const full = { fullAccess: [{ type: 'domain', value: 'example.test' }] };
+  f.read.setSiteRules(full); f.write.setSiteRules(full);
+  await f.action(snapshot, f.element(snapshot, 'Name'), 'fill', { value: 'allowed by site rule' });
+  assert.equal(f.window.document.getElementById('name').value, 'allowed by site rule');
+  assert.equal(f.readPrompts(), 0); assert.equal(f.writePrompts(), 0);
+  const blocked = { ...full, blocked: [{ type: 'host', value: 'example.test' }] };
+  f.read.setSiteRules(blocked); f.write.setSiteRules(blocked);
+  const before = f.injections();
+  await assert.rejects(f.snapshot(), { code: 'SITE_BLOCKED' });
+  await assert.rejects(f.action(snapshot, f.element(snapshot, 'Name'), 'fill', { value: 'forbidden' }), { code: 'SITE_BLOCKED' });
+  assert.equal(f.injections(), before);
+});
 test('fixed actions fill controls with native setters, send events, set checkboxes, select values and click once', async t=>{
   const f=fixture(t);const snapshot=await f.snapshot();const field=f.window.document.getElementById('name');const events=[];
   field.addEventListener('input',()=>events.push('input'));field.addEventListener('change',()=>events.push('change'));

@@ -10,6 +10,62 @@ const [backgroundSource, policySource, waitSource] = await Promise.all([
 ]);
 const settle = async () => { for (let index = 0; index < 5; index++) await new Promise(resolve => setImmediate(resolve)); };
 const clone = value => structuredClone(value);
+
+test('site-rule settings are restricted to their exact settings page, persisted, restored and revision-checked', async () => {
+  const bridge = await mount({ mode: 'deny' });
+  const sender = { id: bridge.browser.runtime.id, url: bridge.browser.runtime.getURL('site-rules.html') };
+  const siteRules = { readOnly: [{ type: 'domain', value: 'example.test' }] };
+  const initial = await bridge.status();
+  const change = { type: 'bridge_site_rules', revision: initial.siteRulesRevision, siteRules };
+  assert.equal(await bridge.message(change), undefined, 'toolbar cannot silently edit permanent exceptions');
+  assert.equal(await bridge.message(change, { ...sender, id: 'other-addon' }), undefined);
+  assert.equal(await bridge.message(change, { ...sender, url: sender.url + '?forged' }), undefined);
+  const saved = await bridge.message(change, sender);
+  assert.equal(saved.siteRulesRevision, initial.siteRulesRevision + 1);
+  assert.equal(bridge.storageData.bridgeSiteRules.readOnly[0].value, 'example.test');
+  const request = await bridge.request();
+  assert.equal(bridge.posted.find(message => message.id === request)?.result.authorized, true);
+  assert.equal((await bridge.status()).pendingApproval, null);
+  await assert.rejects(bridge.message(change, sender), /inzwischen geändert/);
+  const restarted = await mount({ savedState: clone(bridge.storageData) });
+  const afterRestart = await restarted.request();
+  assert.equal(restarted.posted.find(message => message.id === afterRestart)?.result.authorized, true);
+  assert.equal(await bridge.message({ type: 'bridge_settings', settings: { enabled: false } }, sender), undefined);
+});
+
+test('failed storage saves cannot enable permanent exceptions, concurrent editors cannot overwrite each other', async () => {
+  const bridge = await mount({ mode: 'deny' });
+  const sender = { id: bridge.browser.runtime.id, url: bridge.browser.runtime.getURL('site-rules.html') };
+  const change = { type: 'bridge_site_rules', revision: 0, siteRules: { fullAccess: [{ type: 'domain', value: 'example.test' }] } };
+  const set = bridge.browser.storage.local.set;
+  bridge.browser.storage.local.set = async () => { throw new Error('disk full'); };
+  await assert.rejects(bridge.message(change, sender), /disk full/);
+  assert.equal(bridge.policy.siteAccess('https://example.test/page'), null);
+  bridge.browser.storage.local.set = set;
+  const results = await Promise.allSettled([bridge.message(change, sender), bridge.message(change, sender)]);
+  assert.deepEqual(results.map(result => result.status), ['fulfilled', 'rejected']);
+  assert.equal((await bridge.status()).siteRulesRevision, 1);
+});
+
+test('saving a site block revokes pending approval and invalid stored filters fail closed while keeping metadata', async () => {
+  const bridge = await mount();
+  const id = await bridge.request();
+  const approval = (await bridge.status()).pendingApproval;
+  const sender = { id: bridge.browser.runtime.id, url: bridge.browser.runtime.getURL('site-rules.html') };
+  await bridge.message({ type: 'bridge_site_rules', revision: 0, siteRules: { blocked: [{ type: 'domain', value: 'example.test' }] } }, sender);
+  await settle();
+  assert.equal((await bridge.status()).pendingApproval, null);
+  assert.equal((await bridge.message({ type: 'approval_answer', id: approval.id, allowed: true })).ok, false);
+  assert.ok(bridge.posted.find(message => message.id === id)?.error);
+  const blocked = await bridge.request();
+  assert.equal(bridge.posted.find(message => message.id === blocked)?.error.code, 'SITE_BLOCKED');
+  const broken = await mount({ savedState: { bridgeSettings: { enabled: true, contentMode: 'allow', contentScope: 'all' }, bridgeSiteRules: { blocked: [{ type: 'domain', value: 'bad/domain' }] } } });
+  assert.match((await broken.status()).siteRulesError, /Domain/);
+  const denied = await broken.request();
+  assert.equal(broken.posted.find(message => message.id === denied)?.error.code, 'SITE_RULES_UNAVAILABLE');
+  const metadata = await broken.request(undefined, 'get_tabs', { tabIds: [42] });
+  assert.equal(broken.posted.find(message => message.id === metadata)?.result.tabs[0].url, 'https://example.test/page');
+});
 let persistentUuidSequence = 0;
 function event() {
   const listeners = new Set();

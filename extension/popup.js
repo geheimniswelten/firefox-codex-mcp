@@ -126,8 +126,8 @@ function render(state) {
       ? `${fiveDays ? "5-Tage-Freigabe" : "Sitzungsfreigabe"} bis ${new Date(expiresAt).toLocaleString("de-DE")}.`
       : fiveDays ? "Noch keine aktive 5-Tage-Freigabe. Bei der nächsten Inhaltsanfrage wird gefragt." : "Noch keine aktive Sitzungsfreigabe."
     : "");
-  el("error").hidden = !state.lastError;
-  setText("error", state.lastError || "");
+  el("error").hidden = !state.lastError && !state.siteRulesError;
+  setText("error", state.lastError || state.siteRulesError || "");
   setText("version", state.version);
 }
 async function request(message) {

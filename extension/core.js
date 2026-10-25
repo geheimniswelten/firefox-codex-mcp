@@ -1,7 +1,7 @@
 ﻿/* Shared as a plain background script and a side-effect module in Node tests. */
 (() => {
   "use strict";
-  const VERSION = "1.0.7";
+  const VERSION = "1.0.8";
   const SESSION_KEY = "firefox-codex-mcp.metadata.v1";
   const MAX_RESPONSE_BYTES = 800000; // Leave room for the native RPC envelope.
   const COLORS = ["blue", "cyan", "grey", "green", "orange", "pink", "purple", "red", "yellow"];
@@ -379,11 +379,13 @@
           const authorizedUrl = tab.url, revision = options.contentAccess?.revision, authorization = {};
           if (options.contentAccess) tab = await options.contentAccess.authorize(tab, authorization);
           const tabRevision = options.contentAccess?.tabRevisions?.get(p.tabId) || 0;
+          const frameRevision = options.contentAccess?.frameRevisions?.get(p.tabId) || 0;
           const assertExportLive = () => {
             context.assertLive?.();
             const access = options.contentAccess;
             if (access && access.revision !== revision) throw new BridgeError("PERMISSION_CHANGED", "Die Inhaltsfreigabe wurde während des Exports widerrufen.");
             if (access?.tabRevisions && (access.tabRevisions.get(p.tabId) || 0) !== tabRevision) throw new BridgeError("PAGE_CHANGED", "Die Seite wurde seit der Inhaltsfreigabe gewechselt.");
+            if (access?.siteRules?.blocked.length && (access.frameRevisions.get(p.tabId) || 0) !== frameRevision) throw new BridgeError("PAGE_CHANGED", "Ein eingebettetes Dokument wurde während des Exports gewechselt.");
             const grant = access?.authorizations?.get(authorization);
             if (grant) access.assertGrant(grant, p.tabId, authorizedUrl, revision);
             else if (["ask-session", "ask-five-days"].includes(access?.settings?.contentMode) && (access.expiresAt === null || access.now() >= access.expiresAt)) throw new BridgeError("SESSION_EXPIRED", "Die Inhaltsfreigabe ist während des Exports abgelaufen.");
@@ -394,6 +396,7 @@
               : await browser.tabs.get(p.tabId);
             if (current.url !== authorizedUrl) throw new BridgeError("PAGE_CHANGED", "Die Seite wurde während des Exports gewechselt.");
             if (current.discarded) throw new BridgeError("TAB_DISCARDED", "Der Tab wurde während des Exports entladen.");
+            await options.contentAccess?.assertExportFrames?.(p.tabId, frameRevision);
           };
           await assertAccess(); assertExportLive();
           if (exporting.has(p.tabId)) throw new BridgeError("EXPORT_BUSY", "In diesem Tab läuft bereits ein Export.");

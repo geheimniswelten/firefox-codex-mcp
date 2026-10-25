@@ -35,12 +35,15 @@ function Get-FirefoxSetupRoot {
         $selected = $RequestedRoot
     } else {
         $default = Get-FirefoxInstalledRoot
+        $existingInstallation = [bool]$default
         if (-not $default) {
             if (-not $env:LOCALAPPDATA) { throw 'LOCALAPPDATA is unavailable. Supply -ProjectRoot.' }
             $default = Join-Path $env:LOCALAPPDATA 'FirefoxCodexMCP'
         }
         Write-Host 'Codex MCP for Firefox - local companion'
         Write-Host ('Installation directory: ' + $default)
+        if ($existingInstallation) { Write-Host 'Default: directory of the existing registration (this may be a development/source directory).' }
+        else { Write-Host 'Default for a new installation: %LOCALAPPDATA%\FirefoxCodexMCP.' }
         Write-Host 'Registration updates the companion files in the selected directory.'
         $selected = Read-Host 'Directory (Enter accepts the displayed directory)'
         if (-not $selected) { $selected = $default }

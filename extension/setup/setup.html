@@ -10,13 +10,14 @@
   <body>
     <header><img src="../icon.svg" width="40" height="40" alt=""><div><h1>Firefox ↔ Codex</h1><p>Einrichtung und Registrierung</p></div></header>
     <main>
+      <section aria-labelledby="siteRulesTitle"><h2 id="siteRulesTitle">Seitenfilter und dauerhafte Freigaben</h2><p>Seiteninhalte gezielt sperren, Lesen immer erlauben oder Lesen und Bedienung dauerhaft freigeben.</p><a class="button" href="../site-rules.html" target="_blank" rel="noopener">Seitenfilter bearbeiten</a></section>
       <section aria-labelledby="statusTitle">
         <div class="status-heading"><h2 id="statusTitle">Einrichtung wird geprüft …</h2><button id="checkSetup" type="button" class="secondary">Erneut prüfen</button></div>
         <p id="statusDescription" aria-live="polite">Die Erweiterung wartet auf die Rückmeldung des lokalen Native Hosts.</p>
         <p id="connection" class="note"></p>
         <p id="error" class="error" role="alert" hidden></p>
         <dl>
-          <dt>Erweiterungsversion</dt><dd id="addonVersion">1.0.7</dd>
+          <dt>Erweiterungsversion</dt><dd id="addonVersion">1.0.8</dd>
           <dt>Serverversion</dt><dd id="hostVersion">Noch nicht bestätigt</dd>
           <dt>Benötigte Registrierungsrevision</dt><dd id="requiredRevision">1</dd>
           <dt>Aktuelle Registrierungsrevision</dt><dd id="currentRevision">Noch nicht bestätigt</dd>
@@ -28,17 +29,24 @@
         <p class="note">Die Registrierungsrevision beschreibt die lokale Einrichtung und wird unabhängig von der Erweiterungsversion gezählt. Eine frühere Bestätigung beweist nicht, dass die aktuelle Verbindung funktioniert.</p>
       </section>
       <section aria-labelledby="downloadTitle">
-        <h2 id="downloadTitle">Registrierungsskripte</h2>
+        <h2 id="downloadTitle">Lokalen MCP-Server installieren und registrieren</h2>
+        <p id="installDescription">Das Registrierungsskript installiert oder aktualisiert im gewählten Verzeichnis einen lokalen MCP-Server und Native-Messaging-Helfer auf Basis von Node.js. Anschließend registriert es den Helfer bei Firefox und richtet passende Einträge bei unterstützten KI-Clients ein.</p>
+        <p class="note">Serverdateien und npm-Abhängigkeiten benötigen ungefähr <strong>22 MB</strong>. Falls unter Windows zusätzlich Node.js heruntergeladen werden muss, benötigt dessen Laufzeit weiteren Speicherplatz. Der Server läuft außerhalb von Firefox; das Add-on stellt die Browserfunktionen und Freigaben bereit.</p>
         <label for="platform">Betriebssystem</label>
         <select id="platform"><option value="">Bitte auswählen</option><option value="win">Windows</option><option value="linux">Linux</option><option value="mac">macOS</option></select>
         <p id="platformNote" class="note">Wähle das Betriebssystem, auf dem Firefox und der lokale Server laufen.</p>
+        <dl>
+          <dt>Standardordner bei Neuinstallation</dt><dd id="defaultInstallPath">Bitte Betriebssystem auswählen.</dd>
+          <dt>Derzeit bestätigter Installationsordner</dt><dd id="existingInstallPath">Noch nicht bestätigt.</dd>
+        </dl>
+        <p class="note">Das Skript schlägt bei einer vorhandenen Registrierung deren bisherigen Installationsordner vor. Das kann auch ein Entwicklungsverzeichnis sein. Du kannst einen anderen absoluten Pfad eingeben; eine abweichende bestehende Registrierung wird nicht still überschrieben. Im bestätigten Zielordner werden die enthaltenen Server- und Einrichtungsdateien aktualisiert und können ersetzt werden.</p>
         <div class="downloads"><button id="registerDownload" type="button" disabled aria-disabled="true">Registrierungsskript speichern</button><button id="unregisterDownload" type="button" class="secondary" disabled aria-disabled="true">Deregistrierungsskript speichern</button></div>
         <p id="downloadStatus" class="note" role="status" aria-live="polite"></p>
         <div id="commandInstructions" hidden>
           <p id="commandIntro">Öffne ein Terminal im Ordner der gespeicherten Skripte.</p>
-          <label for="registerCommand">Registrieren oder aktualisieren:</label>
+          <label for="registerCommand">Installieren oder aktualisieren und registrieren:</label>
           <div class="command-row"><textarea id="registerCommand" rows="2" readonly spellcheck="false"></textarea><button id="copyRegisterCommand" type="button" class="secondary" aria-label="Registrierungsbefehl kopieren">Kopieren</button></div>
-          <label for="unregisterCommand">Deregistrieren:</label>
+          <label for="unregisterCommand">Nur deregistrieren – Installationsdateien behalten:</label>
           <div class="command-row"><textarea id="unregisterCommand" rows="2" readonly spellcheck="false"></textarea><button id="copyUnregisterCommand" type="button" class="secondary" aria-label="Deregistrierungsbefehl kopieren">Kopieren</button></div>
           <p id="copyStatus" class="note" role="status" aria-live="polite"></p>
           <p id="windowsInstructions" class="note" hidden>Ein Doppelklick auf eine .ps1-Datei öffnet häufig nur den Editor. Die Ausführungsrichtlinie wird mit diesen Befehlen nur für den gestarteten Skriptprozess gesetzt.</p>
@@ -49,7 +57,7 @@
           <li>Klicke nach Abschluss auf „Erneut prüfen“. Erst die Rückmeldung des Native Hosts bestätigt den ausgeführten Stand.</li>
         </ol>
         <p>Der Download kommt direkt aus dem Erweiterungspaket und funktioniert ohne Internetverbindung. Die Skripte enthalten den lokalen Server. Während ihrer Ausführung können Node und npm-Abhängigkeiten aus dem Internet geladen werden.</p>
-        <p class="note">Das Deregistrierungsskript entfernt die lokale Registrierung. Es wird ebenfalls erst nach dem Speichern manuell ausgeführt.</p>
+        <p id="unregisterDescription" class="note">Unregister entfernt die Firefox-Native-Host-Registrierung, den zugehörigen Registrierungsbeleg und nach Möglichkeit die passenden verwalteten KI-Client-Einträge. Der Installationsordner wird nicht gelöscht: Serverdateien, node_modules, eine lokal installierte Node.js-Laufzeit, Quellcode und Einstellungen bleiben erhalten – auch bei einer reinen Laufzeitinstallation. Das Add-on selbst wird nicht deinstalliert. Bestehende Verbindungen danach neu laden. Auch dieses Skript wird erst nach dem Speichern manuell ausgeführt.</p>
       </section>
     </main>
   </body>

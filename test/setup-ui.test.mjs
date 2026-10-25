@@ -50,6 +50,26 @@ test('options page requests the download API permission and opens in its own tab
   assert.equal(manifest.name, 'Codex MCP for Firefox');
 });
 
+test('setup shows fresh-install defaults separately from the currently confirmed installation and ignores historical paths', async () => {
+  const cases = [
+    ['win', '%LOCALAPPDATA%\\FirefoxCodexMCP', 'C:\\DevComps.git\\Firefox MCP-Server', '\\.local\\de.codex.firefox_bridge.json'],
+    ['linux', '~/.local/share/firefox-codex-mcp', '/home/user/firefox-dev', '/.local/de.codex.firefox_bridge.json'],
+    ['mac', '~/Library/Application Support/FirefoxCodexMCP', '/Users/user/firefox-dev', '/.local/de.codex.firefox_bridge.json'],
+  ];
+  for (const [platform, fresh, root, suffix] of cases) {
+    const initial = state(platform); initial.setup.registration.manifestPath = root + suffix;
+    const f = await mount(initial);
+    assert.equal(f.el('defaultInstallPath').textContent, fresh);
+    assert.equal(f.el('existingInstallPath').textContent, root);
+    f.select(platform === 'win' ? 'linux' : 'win');
+    assert.match(f.el('existingInstallPath').textContent, /Noch nicht bestätigt/);
+    initial.setup.lastConfirmation = { verifiedAt: '2026-10-22T10:00:00.000Z', registration: initial.setup.registration, hostVersion: '1.0.8' };
+    initial.setup.registration = null; f.setState(initial); f.select(platform); await f.refresh();
+    assert.match(f.el('existingInstallPath').textContent, /Noch nicht bestätigt/);
+    f.close();
+  }
+});
+
 test('all platforms download packaged scripts only after clicking and open a save dialog with the right filename', async () => {
   for (const platform of ['win', 'linux', 'mac']) {
     const f = await mount(state(platform));

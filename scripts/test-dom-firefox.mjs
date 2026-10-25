@@ -16,7 +16,7 @@ const fixture = `<!doctype html><html><head><meta charset="utf-8"><title>DOM fix
 <select id="select"><option value="a">Alpha</option><option value="b">Beta</option><option value="c" disabled>Disabled</option></select>
 <button id="submit" type="button">Submit</button><a href="/next">Next page</a><input type="password" value="secret">
 <button hidden>Hidden</button><button disabled>Disabled</button><a href="javascript:alert(1)">Script link</a>
-<output id="events">No events</output><script>
+<iframe src="/embedded" title="Embedded fixture"></iframe><output id="events">No events</output><script>
 const events=[];for(const type of ['input','change'])document.getElementById('name').addEventListener(type,event=>{events.push(type);document.getElementById('events').textContent=events.join(',');});
 document.getElementById('submit').addEventListener('click',()=>{document.getElementById('submit').textContent='Clicked once';});
 </script></body></html>`;
@@ -27,17 +27,23 @@ const server=http.createServer(async(request,response)=>{
     try{const chunks=[];let bytes=0;for await(const chunk of request){bytes+=chunk.length;if(bytes>128*1024)throw new Error('Report too large');chunks.push(chunk);}const result=JSON.parse(Buffer.concat(chunks).toString());response.writeHead(200).end('ok');resolveReport(result);}
     catch(error){response.writeHead(400).end('invalid');resolveReport({ok:false,error:String(error)});}return;
   }
-  response.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}).end(fixture);
+  response.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}).end(request.url === '/embedded' ? '<!doctype html><p>Embedded fixture</p>' : fixture);
 });
 async function runTests(origin,token){
   const checks=[];let service,read,write,tabId;
   const equal=(name,actual,expected)=>{const passed=JSON.stringify(actual)===JSON.stringify(expected);checks.push({name,passed,actual});if(!passed)throw new Error(`${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);};
   const rejects=async(name,promise,code)=>{try{await promise;throw new Error(`${name}: accepted unexpectedly`);}catch(error){equal(name,error.code,code);}};
-  const loaded=async()=>{const deadline=Date.now()+10000;while(Date.now()<deadline){const tab=await browser.tabs.get(tabId);if(tab.status==='complete')return;await new Promise(resolve=>setTimeout(resolve,30));}throw new Error('Tab did not load');};
+  const loaded=async()=>{const deadline=Date.now()+10000;while(Date.now()<deadline){const tab=await browser.tabs.get(tabId);if(tab.status==='complete'&&tab.url===origin+'/fixture')return;await new Promise(resolve=>setTimeout(resolve,30));}throw new Error('Tab did not reach fixture URL');};
+  const nextLoad=()=>new Promise((resolve,reject)=>{
+    const done=()=>{clearTimeout(timeout);browser.webNavigation.onCompleted.removeListener(listener);};
+    const listener=details=>{if(details.frameId===0&&details.url===origin+'/fixture'&&(tabId===undefined||details.tabId===tabId)){done();resolve();}};
+    const timeout=setTimeout(()=>{done();reject(new Error('Fixture navigation did not complete'));},10000);
+    browser.webNavigation.onCompleted.addListener(listener);
+  });
   const send=result=>fetch(`${origin}/report/${token}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result)});
   try{
     const browserInfo=await browser.runtime.getBrowserInfo();
-    const tab=await browser.tabs.create({url:origin+'/fixture',active:true});tabId=tab.id;await loaded();
+    const initialLoad=nextLoad();const tab=await browser.tabs.create({url:origin+'/fixture',active:true});tabId=tab.id;await initialLoad;await loaded();
     read=new FirefoxBridgePolicy.ContentAccess(browser,{settings:{enabled:true,contentMode:'allow',contentScope:'all'}});
     let prompts=0,revoke=false;
     write=new FirefoxBridgePolicy.InteractionAccess(browser,{settings:{enabled:true,interactionMode:'ask-every-time',interactionScope:'all'},requestApproval:async request=>{
@@ -73,8 +79,28 @@ async function runTests(origin,token){
     await rejects('read revocation during write approval stops mutation',act(element('Name'),'fill',{value:'forbidden'}),'PERMISSION_CHANGED');
     revoke=false;read.setSettings({enabled:true,contentMode:'allow',contentScope:'all'});
     equal('denied fill left value unchanged',(await service.handle('read_dom',{tabId})).elements.find(item=>item.label==='Name').value,'Changed in Firefox');
-    await browser.tabs.reload(tabId);await loaded();
+    const reloadCompleted=nextLoad();await browser.tabs.reload(tabId);await reloadCompleted;await loaded();
     await rejects('same-URL reload rejects old document references',act(element('Name'),'fill',{value:'forbidden'}),'PAGE_CHANGED');
+    read.setSettings({enabled:true,contentMode:'deny',contentScope:'active'});
+    write.setSettings({enabled:true,interactionMode:'deny',interactionScope:'active'});
+    const applyRules=rules=>{read.setSiteRules(rules);write.setSiteRules(rules);};
+    applyRules({readOnly:[{type:'url',value:origin+'/fixture'}]});
+    const allowedRead=await service.handle('read_dom',{tabId});
+    equal('read exception overrides normal content denial',allowedRead.text.includes('Visible DOM fixture'),true);
+    const field=allowedRead.elements.find(item=>item.label==='Name');
+    const fill=()=>service.handle('interact',{tabId,documentId:allowedRead.documentId,elementId:field.elementId,action:'fill',value:'Permanent full access'});
+    await rejects('read exception keeps normal write denial',fill(),'INTERACTION_DENIED');
+    applyRules({fullAccess:[{type:'url',value:origin+'/fixture'}]});
+    equal('full exception overrides both general denials',(await fill()).dispatched,true);
+    equal('full exception reached actual input',(await service.handle('read_dom',{tabId})).elements.find(item=>item.label==='Name').value,'Permanent full access');
+    applyRules({fullAccess:[{type:'url',value:origin+'/fixture'}],blocked:[{type:'host',value:'127.0.0.1'}]});
+    await rejects('block overrides full exception for reads',service.handle('read_content',{tabId}),'SITE_BLOCKED');
+    await rejects('block overrides full exception for DOM writes',fill(),'SITE_BLOCKED');
+    equal('blocked tabs still expose URL metadata',(await service.handle('get_tabs',{tabIds:[tabId]})).results[0].result.url,origin+'/fixture');
+    read.setSettings({enabled:true,contentMode:'allow',contentScope:'all'});
+    applyRules({blocked:[{type:'url',value:origin+'/embedded'}]});
+    for(const method of ['save_png','save_html','save_pdf'])await rejects(`${method} blocks embedded forbidden document`,service.handle(method,{tabId}),'SITE_BLOCKED');
+    applyRules({});
     await send({ok:true,browser:browserInfo,checks,approvalAdapter:'in-test explicit allow/deny; real Firefox DOM and isolated extension; no user profile or native host'});
   }catch(error){await send({ok:false,error:String(error),code:error.code,stack:error.stack,checks});}
   finally{service?.tracker.stop();read?.windowTracker.stop();write?.windowTracker.stop();}

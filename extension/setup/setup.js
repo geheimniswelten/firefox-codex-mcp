@@ -17,6 +17,13 @@ function renderDownloads() {
     button.setAttribute("aria-disabled", String(button.disabled));
   }
   setText("registerDownload", currentState?.setup?.status === "update_required" ? "Aktualisierungsskript speichern" : "Registrierungsskript speichern");
+  const defaultRoots = { win: "%LOCALAPPDATA%\\FirefoxCodexMCP", linux: "~/.local/share/firefox-codex-mcp", mac: "~/Library/Application Support/FirefoxCodexMCP" };
+  setText("defaultInstallPath", defaultRoots[platform] || "Bitte Betriebssystem auswählen.");
+  const registration = currentState?.setup?.registration;
+  const manifestPath = registration?.platform === platform ? registration.manifestPath : "";
+  const suffix = platform === "win" ? /[\\/]\.local[\\/]de\.codex\.firefox_bridge\.json$/iu : /\/\.local\/de\.codex\.firefox_bridge\.json$/u;
+  setText("existingInstallPath", typeof manifestPath === "string" && suffix.test(manifestPath)
+    ? manifestPath.replace(suffix, "") : "Noch nicht bestätigt; das Skript ermittelt eine vorhandene Registrierung beim Ausführen.");
   el("commandInstructions").hidden = !supported;
   setText("commandIntro", platform === "win"
     ? "Öffne PowerShell im Ordner der gespeicherten Skripte."

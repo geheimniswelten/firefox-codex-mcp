@@ -1,5 +1,5 @@
 #!/bin/sh
-# Companion 1.0.7; registration revision 1.
+# Companion 1.0.8; registration revision 1.
 set -eu
 firefox_root=''
 firefox_no_clients=''
@@ -59,6 +59,7 @@ try {
   }
 } catch (error) { console.error('Native Host deregistered; registration receipt was kept: ' + error.message); process.exitCode = 2; }
 console.log('Native Host deregistered. Companion files and settings are kept.');
+console.log('Installation directory kept: ' + root);
 if (!process.argv[3]) {
   try {
     const candidates = [join(scriptDirectory, 'scripts/client-config.mjs'), ...(basename(scriptDirectory) === 'scripts' ? [join(scriptDirectory, 'client-config.mjs')] : []), join(root, 'scripts/client-config.mjs')];
