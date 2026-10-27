@@ -89,7 +89,12 @@ async function changeInventoryPermission() {
   try {
     // Invoke directly in the click handler, before its first await. Firefox
     // requires a user gesture to request optional data-collection consent.
-    await (wanted ? browser.permissions.request(inventoryPermission) : browser.permissions.remove(inventoryPermission));
+    const result = wanted ? browser.permissions.request(inventoryPermission) : browser.permissions.remove(inventoryPermission);
+    // Firefox can place its native permission prompt behind this toolbar panel.
+    // Request first to retain the click gesture, then expose the browser prompt.
+    // No saved state depends on this panel surviving; reopening reads Firefox's grant.
+    if (wanted) window.close();
+    await result;
   } catch (error) {
     el("inventoryError").hidden = false;
     setText("inventoryError", String(error.message || error));

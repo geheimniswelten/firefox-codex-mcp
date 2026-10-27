@@ -17,7 +17,7 @@ function deferred() {
 function approval(overrides = {}) {
   return { id: 'approval-a', tabId: 17, title: 'Example page', url: 'https://example.com/', mode: 'ask-session', scope: 'active', expiresAt: Date.now() + 120000, ...overrides };
 }
-function mount({ granted = false, rejection = null, accepted = true, pendingApproval = null } = {}) {
+function mount({ granted = false, rejection = null, accepted = true, pendingApproval = null, permissionResult = null } = {}) {
   const elements = new Map(), messages = [], calls = [];
   const statusResponses = [], windowListeners = new Map();
   let userGesture = false, currentGrant = granted, interval, intervalCleared = false, now = Date.now(), answerHandler = null;
@@ -55,6 +55,7 @@ function mount({ granted = false, rejection = null, accepted = true, pendingAppr
       request(options) {
         assert.equal(userGesture, true, 'permission request must begin synchronously in click gesture');
         calls.push(['request', structuredClone(options)]);
+        if (permissionResult) return permissionResult;
         if (rejection) return Promise.reject(new Error(rejection));
         currentGrant = accepted; browser.permissions.onAdded.emit(); return Promise.resolve(accepted);
       },
@@ -64,7 +65,7 @@ function mount({ granted = false, rejection = null, accepted = true, pendingAppr
   class ClockDate extends Date { static now() { return now; } }
   vm.runInContext(source, vm.createContext({
     browser, document: { getElementById: el }, Date: ClockDate,
-    window: { addEventListener(name, fn) { windowListeners.set(name, fn); }, close() { throw new Error('Answering a toolbar approval must not close a window.'); } },
+    window: { addEventListener(name, fn) { windowListeners.set(name, fn); }, close() { calls.push(['closePopup']); } },
     setInterval: fn => { interval = fn; return 1; }, clearInterval() { intervalCleared = true; }
   }));
   return {
@@ -133,7 +134,7 @@ test('inventory consent defaults off and requests only data collection directly 
   assert.equal(popup.el('inventoryPermission').disabled, false);
   await popup.click(true);
   assert.equal(popup.el('inventoryPermission').checked, true);
-  assert.deepEqual(popup.calls, [['request', { data_collection: ['technicalAndInteraction'] }]]);
+  assert.deepEqual(popup.calls, [['request', { data_collection: ['technicalAndInteraction'] }], ['closePopup']]);
   assert.equal(popup.messages.some(message => message.type === 'bridge_settings'), false);
 });
 
@@ -146,6 +147,27 @@ test('existing consent is displayed and can be revoked independently from MCP/co
   assert.equal(popup.el('contentMode').value, 'ask-session');
   assert.equal(popup.el('contentScope').value, 'active');
   assert.equal(popup.messages.some(message => message.type === 'bridge_settings'), false);
+});
+
+test('native permission prompt is exposed before its unanswered request resolves', async () => {
+  const response = deferred(), popup = mount({ permissionResult: response.promise });
+  await settle();
+  const pending = popup.click(true);
+  assert.deepEqual(popup.calls, [['request', { data_collection: ['technicalAndInteraction'] }], ['closePopup']]);
+  assert.equal(popup.el('inventoryPermission').disabled, true);
+  response.resolve(false); await pending;
+  assert.equal(popup.el('inventoryPermission').checked, false);
+  const reopened = mount({ granted: true }); await settle();
+  assert.equal(reopened.el('inventoryPermission').checked, true);
+  assert.equal(reopened.calls.length, 0);
+});
+
+test('answering content approvals keeps the toolbar popup open', async () => {
+  for (const allowed of [false, true]) {
+    const popup = mount({ pendingApproval: approval() }); await settle();
+    await popup.clickApproval(allowed);
+    assert.equal(popup.calls.some(call => call[0] === 'closePopup'), false);
+  }
 });
 
 test('denied or rejected consent requests restore unchecked state and permit retry', async () => {
