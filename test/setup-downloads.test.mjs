@@ -46,6 +46,40 @@ test('payload extraction preserves local configuration and rejects unrelated app
   assert.equal(await readFile(join(foreign, 'package.json'), 'utf8'), '{"name":"another-app"}');
 });
 
+test('packaged payload refuses Git repositories, worktrees and nested targets without writing', async t => {
+  const directory = await fixture(t), payload = await buildPayload(project);
+  for (const marker of ['directory', 'file']) {
+    const root = join(directory, marker);
+    await mkdir(root);
+    if (marker === 'directory') await mkdir(join(root, '.git'));
+    else await writeFile(join(root, '.git'), 'gitdir: elsewhere');
+    await writeFile(join(root, 'package.json'), '{"name":"firefox-codex-mcp","keep":true}');
+    await assert.rejects(extractPayload(payload, root), /Git working tree/);
+    await assert.rejects(extractPayload(payload, join(root, 'nested')), /Git working tree/);
+    assert.match(await readFile(join(root, 'package.json'), 'utf8'), /keep/);
+    await assert.rejects(readFile(join(root, 'server/native-host.mjs')), { code: 'ENOENT' });
+  }
+});
+
+test('Windows packaged extraction protects Git worktrees before writing', { skip: process.platform !== 'win32' }, async t => {
+  await buildSetupDownloads(project);
+  const directory = await fixture(t), root = join(directory, 'source');
+  await mkdir(root); await writeFile(join(root, '.git'), 'gitdir: elsewhere');
+  await writeFile(join(root, 'package.json'), '{"name":"firefox-codex-mcp","keep":true}');
+  const code = [
+    '$ErrorActionPreference="Stop"; $tokens=$null; $errors=$null',
+    '$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:FIREFOX_MCP_TEST_DOWNLOAD,[ref]$tokens,[ref]$errors)',
+    'foreach($function in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $function.Extent.Text}',
+    'try { Expand-FirefoxSetupPayload -Root $env:FIREFOX_MCP_TEST_OUTPUT; exit 9 } catch { if($_.Exception.Message -notmatch "Git working tree"){throw}; Write-Output "PROTECTED" }',
+  ].join('\n');
+  const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', code], {
+    encoding: 'utf8', windowsHide: true, timeout: 30000,
+    env: { ...process.env, FIREFOX_MCP_TEST_DOWNLOAD: join(project, 'extension/setup/register.ps1'), FIREFOX_MCP_TEST_OUTPUT: root },
+  });
+  assert.equal(run.status, 0, run.stderr || run.stdout); assert.match(run.stdout, /PROTECTED/);
+  assert.match(await readFile(join(root, 'package.json'), 'utf8'), /keep/);
+});
+
 test('payload rejects linked destination files before updating earlier companion files', async t => {
   const directory = await fixture(t), root = join(directory, 'installed'), outside = join(directory, 'outside');
   const payload = await buildPayload(project);
@@ -133,6 +167,19 @@ test('Windows download path selection refuses drive-relative paths and normalize
   const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', probe], { env: { ...process.env, FIREFOX_MCP_TEST_ROOT: directory + '\\' }, encoding: 'utf8', windowsHide: true, timeout: 10000 });
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout.trim(), directory);
+});
+
+test('Windows packaged installer defaults away from a registered Git development tree', { skip: process.platform !== 'win32' }, async t => {
+  const directory = await fixture(t), root = join(directory, 'source');
+  await mkdir(root); await mkdir(join(root, '.git'));
+  const common = await readFile(join(project, 'scripts/templates/setup-common.ps1'), 'utf8');
+  const probe = join(directory, 'probe.ps1');
+  await writeFile(probe, common + '\nfunction Get-FirefoxInstalledRoot { return $env:FIREFOX_MCP_TEST_ROOT }\nfunction Read-Host { return "" }\nGet-FirefoxSetupRoot\n');
+  const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', probe], {
+    env: { ...process.env, LOCALAPPDATA: directory, FIREFOX_MCP_TEST_ROOT: root }, encoding: 'utf8', windowsHide: true, timeout: 10000,
+  });
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  assert.equal(run.stdout.trim().split(/\r?\n/u).at(-1), join(directory, 'FirefoxCodexMCP'));
 });
 
 test('Windows self-contained download calls installed setup with named switches and preserves external hardlinks', { skip: process.platform !== 'win32' }, async t => {

@@ -39,7 +39,7 @@
           <dt>Standardordner bei Neuinstallation</dt><dd id="defaultInstallPath">Bitte Betriebssystem auswählen.</dd>
           <dt>Derzeit bestätigter Installationsordner</dt><dd id="existingInstallPath">Noch nicht bestätigt.</dd>
         </dl>
-        <p class="note">Das Skript schlägt bei einer vorhandenen Registrierung deren bisherigen Installationsordner vor. Das kann auch ein Entwicklungsverzeichnis sein. Du kannst einen anderen absoluten Pfad eingeben; eine abweichende bestehende Registrierung wird nicht still überschrieben. Im bestätigten Zielordner werden die enthaltenen Server- und Einrichtungsdateien aktualisiert und können ersetzt werden.</p>
+        <p class="note">Das Skript schlägt bei einer vorhandenen Registrierung deren bisherigen Installationsordner vor. Liegt dieser in einem Git-Arbeitsverzeichnis, wird stattdessen das normale Anwendungsverzeichnis vorgeschlagen. Der Paketinstaller überschreibt keine Git-Arbeitsverzeichnisse. Du kannst einen anderen absoluten Pfad eingeben; eine abweichende bestehende Registrierung wird nicht still überschrieben. Im bestätigten Zielordner werden die enthaltenen Server- und Einrichtungsdateien aktualisiert und können ersetzt werden.</p>
         <div class="downloads"><button id="registerDownload" type="button" disabled aria-disabled="true">Registrierungsskript speichern</button><button id="unregisterDownload" type="button" class="secondary" disabled aria-disabled="true">Deregistrierungsskript speichern</button></div>
         <p id="downloadStatus" class="note" role="status" aria-live="polite"></p>
         <div id="commandInstructions" hidden>
@@ -53,7 +53,7 @@
         </div>
         <ol>
           <li>Speichere das passende Registrierungsskript.</li>
-          <li>Führe die gespeicherte Datei selbst aus und folge ihren Angaben. Wähle für das Aktualisieren einer vorhandenen Projektinstallation deren Installationsordner ausdrücklich aus. Eine abweichende bestehende Registrierung wird nicht still überschrieben.</li>
+          <li>Führe die gespeicherte Datei selbst aus und folge ihren Angaben. Verwende ein separates Installationsverzeichnis. Für eine Git-Entwicklungskopie nutze deren eigenes install.ps1 beziehungsweise scripts/setup.mjs. Eine abweichende bestehende Registrierung wird nicht still überschrieben.</li>
           <li>Klicke nach Abschluss auf „Erneut prüfen“. Erst die Rückmeldung des Native Hosts bestätigt den ausgeführten Stand.</li>
         </ol>
         <p>Der Download kommt direkt aus dem Erweiterungspaket und funktioniert ohne Internetverbindung. Die Skripte enthalten den lokalen Server. Während ihrer Ausführung können Node und npm-Abhängigkeiten aus dem Internet geladen werden.</p>

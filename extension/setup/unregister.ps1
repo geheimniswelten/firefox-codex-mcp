@@ -32,12 +32,27 @@ function Get-FirefoxNativeRegistration {
     }
     return [pscustomobject]@{ Root = $root; ManifestPath = $manifestPath; RegisteredValue = $registeredValue; ManifestText = $manifestText }
 }
+function Test-FirefoxGitWorkingTree {
+    param([string]$Path)
+    $current = [IO.Path]::GetFullPath($Path)
+    while ($current) {
+        if (Test-Path -LiteralPath (Join-Path $current '.git')) { return $true }
+        $parent = [IO.Path]::GetDirectoryName($current)
+        if ($parent -eq $current) { break }
+        $current = $parent
+    }
+    return $false
+}
 function Get-FirefoxSetupRoot {
     param([string]$RequestedRoot)
     if ($RequestedRoot) {
         $selected = $RequestedRoot
     } else {
         $default = Get-FirefoxInstalledRoot
+        if ($default -and (Test-FirefoxGitWorkingTree -Path $default)) {
+            Write-Host 'The registered directory is a Git working tree; packaged setup will use a separate installation directory.'
+            $default = $null
+        }
         $existingInstallation = [bool]$default
         if (-not $default) {
             if (-not $env:LOCALAPPDATA) { throw 'LOCALAPPDATA is unavailable. Supply -ProjectRoot.' }
@@ -45,7 +60,7 @@ function Get-FirefoxSetupRoot {
         }
         Write-Host 'Codex MCP for Firefox - local companion'
         Write-Host ('Installation directory: ' + $default)
-        if ($existingInstallation) { Write-Host 'Default: directory of the existing registration (this may be a development/source directory).' }
+        if ($existingInstallation) { Write-Host 'Default: directory of the existing registration.' }
         else { Write-Host 'Default for a new installation: %LOCALAPPDATA%\FirefoxCodexMCP.' }
         Write-Host 'Registration updates the companion files in the selected directory.'
         $selected = Read-Host 'Directory (Enter accepts the displayed directory)'

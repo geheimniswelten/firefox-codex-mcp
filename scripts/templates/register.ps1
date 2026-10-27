@@ -26,6 +26,7 @@ function Expand-FirefoxSetupPayload {
     if ($payload.schemaVersion -ne 1 -or $payload.version -ne '__VERSION__' -or @($payload.files).Count -gt 200) { throw 'Unexpected companion payload.' }
     $Root = [IO.Path]::GetFullPath($Root)
     Assert-FirefoxOrdinaryPath -Path $Root -Directory
+    if (Test-FirefoxGitWorkingTree -Path $Root) { throw 'Packaged setup cannot overwrite a Git working tree. Choose a separate installation directory; use install.ps1 for development.' }
     $packagePath = Join-Path $Root 'package.json'
     Assert-FirefoxOrdinaryPath -Path $packagePath
     if ([IO.File]::Exists($packagePath)) {

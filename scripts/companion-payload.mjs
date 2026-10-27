@@ -60,6 +60,13 @@ export async function extractPayload(payload, root) {
   validatePayload(payload);
   if (!isAbsolute(root) || resolve(root) === dirname(resolve(root))) throw new Error('Choose an absolute installation directory, not a filesystem root.');
   root = resolve(root);
+  for (let current = root; ; current = dirname(current)) {
+    try {
+      await lstat(join(current, '.git'));
+      throw new Error('Packaged setup cannot overwrite a Git working tree. Choose a separate installation directory; use install.ps1 or scripts/setup.mjs for development.');
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (dirname(current) === current) break;
+  }
   // Check existing ancestors as well as children: no writes through symlinks.
   const ancestors = [];
   for (let parent = root; dirname(parent) !== parent; parent = dirname(parent)) ancestors.unshift(parent);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,7 +61,8 @@ test('Windows build uses locked dev dependencies, the repository directory and a
   assert.deepEqual(result.calls.map(call => call.phase), ['npm', 'check', 'package', 'lint']);
   assert.deepEqual(result.calls[0].args, ['ci', '--include=dev']);
   assert.deepEqual(result.calls.at(-1).args, ['lint', '--source-dir', 'extension']);
-  assert.ok(result.calls.every(call => call.cwd === f.repo));
+  // PowerShell expands Windows 8.3 paths; compare actual directories instead of spellings.
+  for (const call of result.calls) assert.equal(await realpath(call.cwd), await realpath(f.repo));
   assert.match(result.stdout, /firefox-codex-mcp-extension\.zip/);
   assert.match(result.stdout, /firefox-codex-mcp-source\.zip/);
 });

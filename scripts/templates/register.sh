@@ -23,9 +23,11 @@ case "$(uname -s)" in
   *) echo 'This script supports Linux and macOS.' >&2; exit 1 ;;
 esac
 firefox_installed=$(node -e 'const fs=require("node:fs"),p=require("node:path");try{const m=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(m.name!=="de.codex.firefox_bridge"||m.type!=="stdio"||m.allowed_extensions.length!==1||m.allowed_extensions[0]!=="firefox-codex-mcp@local.invalid"||p.basename(m.path)!=="native-host.sh"||p.basename(p.dirname(m.path))!==".local")process.exit(0);process.stdout.write(p.dirname(p.dirname(m.path)))}catch{}' "$firefox_manifest")
-if [ -n "$firefox_installed" ]; then
+if [ -n "$firefox_installed" ] && node -e 'const fs=require("node:fs"),p=require("node:path");let d=p.resolve(process.argv[1]);for(;;){if(fs.existsSync(p.join(d,".git")))process.exit(0);const up=p.dirname(d);if(up===d)process.exit(1);d=up}' "$firefox_installed"; then
+  echo 'The registered directory is a Git working tree; packaged setup will use a separate installation directory.'
+elif [ -n "$firefox_installed" ]; then
   firefox_default=$firefox_installed
-  echo 'Default: directory of the existing registration (this may be a development/source directory).'
+  echo 'Default: directory of the existing registration.'
 else
   echo 'Default: per-user application data directory for a new installation.'
 fi

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "version": "1.0.8",
   "registrationRevision": 1,
-  "archiveSha256": "38d8a3f7965d54ef773178d5b02bf73e620438e119ff4092225b61ddcd6bb090",
+  "archiveSha256": "1493da1325b6ec45cd33cf06634f137218773823571785d93ef3ed7f69478fa8",
   "files": [
     {
       "path": "LICENSE.md",
@@ -14,7 +14,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "ada4c5e2078693f64069c4ce8c4649415502390acaa5da2cfdc0bfc6b52ac883"
+      "sha256": "a3b2f4512121b9c850b9a068b82d3bb88471a171338e5ae20ebff3bb321d605d"
     },
     {
       "path": "install.ps1",
@@ -22,11 +22,11 @@
     },
     {
       "path": "package-lock.json",
-      "sha256": "9eca9e0f01609445ddc9a455e57e56ffcf36c0ad08bbe9f311a2c20a23537bb0"
+      "sha256": "54d60e46e027ee1287d73ac16b35e51e61c937c01b1ccd2b6bb0dd0fbf2abfcc"
     },
     {
       "path": "package.json",
-      "sha256": "275043ac47aeb00009eff0c7e44e5f3d2f93b33ce330cffb1cb9d9a1339c6adf"
+      "sha256": "48c6105568d81975088baccdea6ec532ea028dbb4ba9fae7f9587c1135d942d5"
     },
     {
       "path": "scripts/client-config.mjs",
@@ -34,7 +34,7 @@
     },
     {
       "path": "scripts/companion-payload.mjs",
-      "sha256": "3aa016ff357c36a83efd9dbe918cdeb79821ad6ce21c445e6c84d6ec229ec89b"
+      "sha256": "7cb48c2400d5d7be3bd413702c0bd3a3561579194abcd8b06d99e38f4d228fe8"
     },
     {
       "path": "scripts/configure-clients.mjs",

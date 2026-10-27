@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Seitenfilter – Firefox ↔ Codex</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="site-rules.css">
+  <script src="site-rules.js" defer></script>
+</head>
+<body>
+  <h1>Seitenfilter</h1>
+  <p>Diese Regeln gelten für Seiteninhalte und Bedienaktionen. Allgemeine Tabinformationen wie Titel und URL bleiben bei aktivem MCP verfügbar.</p>
+  <p>Pro Zeile ein Muster mit Typ: <code>domain example.org</code> (einschließlich Subdomains), <code>host www.example.org</code> (exakter Host) oder <code>url https://example.org/privat</code> (Pfad einschließlich Unterpfaden). <code>*</code> ist ein Platzhalter. URL-Parameter und Fragmente werden nicht ausgewertet.</p>
+  <form id="rulesForm">
+    <label for="blocked">Seiteninhalte und Bedienung verweigern</label>
+    <textarea id="blocked" rows="6" spellcheck="false" disabled></textarea>
+    <label for="readOnly">Seiteninhalte immer lesen erlauben</label>
+    <textarea id="readOnly" rows="6" spellcheck="false" disabled></textarea>
+    <label for="fullAccess">Seiteninhalte lesen und Seitenelemente bedienen immer erlauben</label>
+    <textarea id="fullAccess" rows="6" spellcheck="false" disabled></textarea>
+    <p class="note">Sperren haben Vorrang, danach gilt Lesen und Bedienen, danach nur Lesen. Dauerhafte Erlaubnisse gelten unabhängig vom aktiven Tab und den allgemeinen Abfrageregeln. Ohne passenden Filter gelten die normalen Einstellungen. Speichern widerruft bestehende temporäre Freigaben.</p>
+    <div class="actions"><button id="save" type="submit" disabled>Speichern</button><button id="reload" type="button" class="secondary">Gespeicherte Regeln neu laden</button></div>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <p id="error" class="error" role="alert" hidden></p>
+</body>
+</html>
