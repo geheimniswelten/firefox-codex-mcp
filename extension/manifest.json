@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Codex MCP for Firefox",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Lokale MCP-Verbindung für Tabs, Fenster, Tabgruppen, Chronik, Lesezeichen, Seiteninhalte und Export.",
   "browser_specific_settings": {
     "gecko": {

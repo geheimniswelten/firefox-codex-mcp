@@ -32,14 +32,14 @@ test('native framing rejects overflow, malformed JSON and truncated input', () =
   assert.throws(() => new NativeDecoder(() => {}).push(broken));
 });
 
-async function fixture(t, { timeoutMs = 500 } = {}) {
+async function fixture(t, { timeoutMs = 500, collectDiagnostics } = {}) {
   const input = new PassThrough();
   const output = new PassThrough();
   const commands = [];
   const listeners = [];
   const decoder = new NativeDecoder(message => { commands.push(message); for (const fn of listeners) fn(message); });
   output.on('data', bytes => decoder.push(bytes));
-  const bridge = createBridge({ port: 0, token: TOKEN, input, output, timeoutMs });
+  const bridge = createBridge({ port: 0, token: TOKEN, input, output, timeoutMs, ...(collectDiagnostics ? { collectDiagnostics } : {}) });
   t.after(() => { bridge.close(); input.destroy(); output.destroy(); });
   const port = await bridge.listen();
   const send = message => input.write(encodeNativeMessage(message));
@@ -55,6 +55,47 @@ async function fixture(t, { timeoutMs = 500 } = {}) {
   });
   return { send, request, commands, listeners, input, output, bridge, port };
 }
+
+test('diagnostics collect only after Firefox authorizes and abort when Firefox disconnects', async t => {
+  let collections = 0, signal;
+  const f = await fixture(t, { collectDiagnostics: async (method, params, state, currentSignal) => {
+    collections++; signal = currentSignal;
+    await new Promise(resolve => currentSignal.addEventListener('abort', resolve, { once: true }));
+    return state;
+  } });
+  f.send({ type: 'ready' });
+  f.listeners.push(command => { if (command.id) f.send({ id: command.id, error: { code: 'MCP_DISABLED', message: 'Disabled' } }); });
+  assert.equal((await f.request('/rpc', { method: 'get_processes', params: {} })).body.error.code, 'MCP_DISABLED');
+  assert.equal(collections, 0);
+  f.listeners.length = 0;
+  f.listeners.push(command => { if (command.id) { f.send({ id: command.id, result: { pageContentRead: false } }); setImmediate(() => f.input.end()); } });
+  const result = await f.request('/rpc', { method: 'monitor_resources', params: { durationMs: 1000 } });
+  assert.equal(result.body.error.code, 'FIREFOX_DISCONNECTED');
+  assert.equal(collections, 1); assert.equal(signal.aborted, true);
+});
+
+test('diagnostic deadline remains active during native collection and aborts it', async t => {
+  let signal;
+  const f = await fixture(t, { timeoutMs: 30, collectDiagnostics: async (method, params, state, currentSignal) => {
+    signal = currentSignal;
+    await new Promise(resolve => currentSignal.addEventListener('abort', resolve, { once: true }));
+    return state;
+  } });
+  f.send({ type: 'ready' });
+  f.listeners.push(command => { if (command.id) f.send({ id: command.id, result: {} }); });
+  const result = await f.request('/rpc', { method: 'get_processes', params: {} });
+  assert.equal(result.status, 504); assert.equal(signal.aborted, true);
+  assert.match(result.body.error.message, /collection was cancelled/u);
+});
+
+test('diagnostic reply combines Firefox metadata with native measurements', async t => {
+  const f = await fixture(t, { collectDiagnostics: async (method, params, state) => ({ ...state, nativeDiagnostics: { resources: { available: true } } }) });
+  f.send({ type: 'ready' });
+  f.listeners.push(command => { if (command.id) f.send({ id: command.id, result: { pageContentRead: false } }); });
+  const result = await f.request('/rpc', { method: 'diagnostics_snapshot', params: {} });
+  assert.equal(result.body.result.pageContentRead, false);
+  assert.equal(result.body.result.nativeDiagnostics.resources.available, true);
+});
 
 test('loopback bridge authenticates and blocks web origins / DNS rebinding', async t => {
   const f = await fixture(t);

@@ -54,7 +54,7 @@ test('real SDK stdio exposes all tools, forwards calls and rejects invalid schem
   t.after(() => new Promise(resolve => server.close(resolve)));
   const client = await connect(t, server.address().port);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 35);
+  assert.equal(tools.length, 41);
   assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.ok(client.getInstructions().includes('untrusted'));
   assert.equal(tools.find(tool => tool.name === 'firefox_close_tabs').annotations.destructiveHint, true);
@@ -128,7 +128,7 @@ test('tool discovery works offline and a call gives an actionable isError respon
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const client = await connect(t, port);
-  assert.equal((await client.listTools()).tools.length, 35);
+  assert.equal((await client.listTools()).tools.length, 41);
   const response = await client.callTool({ name: 'firefox_status', arguments: {} });
   assert.equal(response.isError, true);
   assert.equal(response.structuredContent.error.code, 'FIREFOX_OFFLINE');
@@ -147,7 +147,7 @@ test('stdio supports modern protocol discovery as well as legacy initialization'
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
   const client = await connect(t, server.address().port, 'auto');
-  assert.equal((await client.listTools()).tools.length, 35);
+  assert.equal((await client.listTools()).tools.length, 41);
   const response = await client.callTool({ name: 'firefox_status', arguments: {} });
   assert.deepEqual(response.structuredContent, { result: { connected: true } });
 });

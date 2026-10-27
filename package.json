@@ -1,6 +1,6 @@
 {
   "name": "firefox-codex-mcp",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": true,
   "description": "Firefox WebExtension und lokaler MCP-Zugriff fuer Codex",
   "type": "module",

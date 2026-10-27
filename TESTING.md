@@ -1,4 +1,12 @@
-# Prüfstand vom 22. Oktober 2026
+# Prüfstand vom 27. Oktober 2026
+
+## Lesende technische Diagnose (1.0.9)
+
+Der vollständige Lauf mit `node --test --test-concurrency=4 test/*.test.mjs` bestand mit **464 erfolgreichen Tests, 0 Fehlern und 1 übersprungenen Test (465 insgesamt)**. Zwei danach ergänzte Tests für den Timeout während einer nativen Messung und die zusammengesetzte Diagnoseantwort bestanden im erneuten Lauf aller **16 Native-Host-Tests** ebenfalls.
+
+Geprüft sind insbesondere Inhalts-/Bedienfreigabe-unabhängige technische Abfragen bei gesperrten Seiten, fehlende Tabtitel/URLs in Diagnoseantworten, Inventarfreigabe, feste OS-Befehle, Ausgabe-Positivlisten, unbekannte Quellen statt erfundener Messwerte, CPU-Differenzen einschließlich PID-Wiederverwendung, begrenzte parallele Messungen sowie Abbruch bei Firefox-Verbindungsende und Timeout. Eine tatsächliche Messung am laufenden Windows-Firefox lieferte Prozesswerte, zwei CPU/RAM-Messpunkte und aggregierte TCP-Zustände. Dieser OS-Test ersetzt noch keinen vollständigen manuellen Durchlauf der neuen Werkzeuge über die neu geladene Firefox-Erweiterung.
+
+Syntaxprüfung: **131 JavaScript-Dateien** und Manifest erfolgreich. Pakete neu gebaut; `web-ext lint`: **0 Fehler, 3 bestehende Warnungen** (Android-Mindestversion und die beiden mitgelieferten Shellskripte). Linux-/macOS-Prozessmessung, Firefox-interne Speicher-/Profilerdaten und Tab-Prozess-Zuordnung sind nicht implementiert und werden als nicht verfügbar dokumentiert.
 
 ## Dauerhafte Seitenfilter (1.0.8)
 

@@ -11,6 +11,23 @@ const { createService, SESSION_KEY, boundResponse, validate } = globalThis.Firef
 const { ContentAccess, iconStatus, SESSION_MS } = globalThis.FirefoxBridgePolicy;
 const clone = value => structuredClone(value);
 
+test('technical diagnostics bypass content grants without reading content or disclosing tab strings', async () => {
+  const browser = mockBrowser([{ id: 1, active: false, url: 'https://private.test/secret?token=secret', title: 'Private title', status: 'loading' }]);
+  const policy = new ContentAccess(browser, { settings: { enabled: true, contentMode: 'deny', contentScope: 'active' }, siteRules: { blocked: [{ type: 'domain', value: 'private.test' }] }, requestApproval: () => assert.fail('No diagnostic approval') });
+  browser.permissions = { getAll: async () => ({ data_collection: [] }) };
+  browser.runtime.getBrowserInfo = () => assert.fail('Version requires consent');
+  const service = createService(browser, { contentAccess: policy });
+  for (const method of ['get_environment', 'get_processes', 'monitor_resources', 'get_network_state', 'diagnostics_snapshot', 'diagnose_tab']) {
+    const result = await service.handle(method, method === 'diagnose_tab' ? { tabId: 1 } : {});
+    assert.equal(result.pageContentRead, false);
+    assert.doesNotMatch(JSON.stringify(result), /private\.test|Private title|token=secret/u);
+    assert.equal(result.browser, undefined);
+  }
+  assert.equal(browser.calls.some(call => call[0] === 'executeScript'), false);
+  for (const args of [{}, { tabId: -1 }, { tabId: 1, includeContent: true }]) assert.throws(() => validate('diagnose_tab', args), { code: 'INVALID_PARAMS' });
+  for (const durationMs of [0, 999, 10001, '2000', 1.5]) assert.throws(() => validate('monitor_resources', { durationMs }), { code: 'INVALID_PARAMS' });
+});
+
 test('extension inventory includes disabled add-ons, filters supported types and paginates without mutating them', async () => {
   const browser = mockBrowser();
   const installed = [

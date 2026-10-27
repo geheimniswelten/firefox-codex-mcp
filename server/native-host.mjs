@@ -4,11 +4,13 @@ import { pathToFileURL } from 'node:url';
 import { configPathFromArgs, loadConfig } from './config.mjs';
 import { encodeNativeMessage, NativeDecoder } from './framing.mjs';
 import { readRegistrationStatus } from '../scripts/registration.mjs';
+import { createDiagnostics, DIAGNOSTIC_METHODS } from './diagnostics.mjs';
 
-export const HOST_VERSION = '1.0.8';
+export const HOST_VERSION = '1.0.9';
 export const PROTOCOL_VERSION = 1;
 
 const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','search_history','list_bookmark_folders','search_bookmarks','create_bookmark','update_bookmark','move_bookmark','delete_bookmark','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','read_dom','interact','wait_for','save_png','save_html','save_pdf','export_chunk','export_release']);
+for (const method of DIAGNOSTIC_METHODS) METHODS.add(method);
 const error = (code, message) => ({ error: { code, message } });
 const waitTimeoutMs = params => Number.isInteger(params.timeoutMs) && params.timeoutMs >= 1 && params.timeoutMs <= 120_000 ? params.timeoutMs : 10_000;
 
@@ -19,7 +21,7 @@ function reply(response, status, body) {
 }
 
 // This HTTP endpoint is a private IPC bridge, not a network MCP endpoint.
-export function createBridge({ port, token, registration = null, input = process.stdin, output = process.stdout, timeoutMs = 30_000, contentTimeoutMs = 130_000, exportTimeoutMs = 280_000 }) {
+export function createBridge({ port, token, registration = null, input = process.stdin, output = process.stdout, timeoutMs = 30_000, contentTimeoutMs = 130_000, exportTimeoutMs = 280_000, collectDiagnostics = createDiagnostics() }) {
   if (!Number.isInteger(exportTimeoutMs) || exportTimeoutMs < 1 || exportTimeoutMs > 600_000) throw new Error('Export timeout must be from 1 to 600000 milliseconds.');
   const pending = new Map();
   let ready = false;
@@ -32,7 +34,8 @@ export function createBridge({ port, token, registration = null, input = process
     try { send({ type: 'cancel', id }); } catch { /* Caller cleanup does not depend on native output. */ }
   };
   const cancelAll = () => {
-    for (const { timer, response } of pending.values()) {
+    for (const { timer, response, controller } of pending.values()) {
+      controller.abort();
       clearTimeout(timer);
       reply(response, 503, error('FIREFOX_DISCONNECTED', 'Firefox disconnected. A mutation may already have run; inspect browser state before retrying.'));
     }
@@ -44,6 +47,20 @@ export function createBridge({ port, token, registration = null, input = process
     if (typeof message.id !== 'string') return;
     const request = pending.get(message.id);
     if (!request) return; // Late or cancelled responses are never replayed.
+    if (request.processing) return;
+    if (DIAGNOSTIC_METHODS.has(request.method) && !message.error && Object.hasOwn(message, 'result')) {
+      request.processing = true;
+      Promise.resolve().then(() => collectDiagnostics(request.method, request.params, message.result, request.controller.signal)).then(result => {
+        if (pending.get(message.id) !== request) return;
+        pending.delete(message.id); clearTimeout(request.timer);
+        reply(request.response, 200, { result });
+      }).catch(() => {
+        if (pending.get(message.id) !== request) return;
+        pending.delete(message.id); clearTimeout(request.timer);
+        reply(request.response, 200, error('DIAGNOSTICS_FAILED', 'Technical diagnostics could not be completed. No page content was read.'));
+      });
+      return;
+    }
     pending.delete(message.id);
     clearTimeout(request.timer);
     if (message.error && typeof message.error.message === 'string') {
@@ -99,17 +116,20 @@ export function createBridge({ port, token, registration = null, input = process
       if (pending.size >= 64) { reply(response, 429, error('BUSY', 'Too many pending requests.')); return; }
       const id = randomUUID();
       const requestTimeout = body.method === 'wait_for' ? waitTimeoutMs(body.params) + 5_000 : body.method === 'interact' ? exportTimeoutMs : ['read_content','read_dom'].includes(body.method) ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(body.method) ? exportTimeoutMs : timeoutMs;
+      const controller = new AbortController();
       const timer = setTimeout(() => {
         const entry = pending.get(id);
         if (!entry) return;
         pending.delete(id);
+        entry.controller.abort();
         cancelWait(id, entry.method);
-        reply(response, 504, error('TIMEOUT', 'Firefox did not respond in time. A mutation may already have run; inspect browser state before retrying.'));
+        reply(response, 504, error('TIMEOUT', DIAGNOSTIC_METHODS.has(entry.method) ? 'Technical diagnostics did not complete in time; collection was cancelled.' : 'Firefox did not respond in time. A mutation may already have run; inspect browser state before retrying.'));
       }, requestTimeout);
-      pending.set(id, { response, timer, method: body.method });
+      pending.set(id, { response, timer, method: body.method, params: body.params, controller });
       response.on('close', () => {
         const entry = pending.get(id);
         if (entry) {
+          entry.controller.abort();
           clearTimeout(entry.timer); pending.delete(id);
           cancelWait(id, entry.method);
         }

@@ -18,11 +18,14 @@ Windows native deregistration needs neither Node nor npm. Optional MCP-client cl
 
 The options UI's setup state distinguishes `disabled`, `pending`, `host_missing`, `connection_error`, `update_required`, `ready` and `unverified`. Current connection plus a registration matching the required revision/protocol/platform confirms `ready`. A saved `lastConfirmation` is historical only and cannot prove the current connection or registration. The registration revision is independent of the extension version. The internal `bridge_reconnect` action rechecks the native connection; it performs no operating-system registration.
 
-Method contract (35 MCP tool names, each with the `firefox_` prefix):
+Method contract (41 MCP tool names, each with the `firefox_` prefix):
 
 | Method | Parameters |
 | --- | --- |
 | status | {} |
+| get_environment / get_processes / get_network_state / diagnostics_snapshot | {} |
+| monitor_resources | {durationMs?:integer 1000..10000, default 2000} |
+| diagnose_tab | {tabId:integer} |
 | get_current | {} |
 | list_windows | {populate?:boolean} |
 | list_extensions | {enabled?:boolean,type?:"extension"\|"theme"\|"all",limit?:integer,offset?:integer} |
@@ -90,7 +93,7 @@ List responses are `{folders|bookmarks,total,returned,offset,limit,nextOffset,un
 
 `delete_bookmark` defaults to `recursive:false`. A nonempty folder returns `FOLDER_NOT_EMPTY` unless explicitly given `recursive:true`; recursive folder deletion uses `bookmarks.removeTree`, while bookmarks, separators and empty nonrecursive folders use `bookmarks.remove`. Success returns `{deleted:true,id,type,recursive,untrustedContent:true}`. `root________`, `toolbar_____`, `menu________`, `unfiled_____` and `mobile______` cannot be updated, moved or deleted (`BOOKMARK_ROOT_PROTECTED`). The internal root is also forbidden as an insertion/move destination; the other fixed roots remain valid destinations for ordinary entries. Moving a folder into itself or a descendant returns `BOOKMARK_CYCLE`. Missing IDs return `BOOKMARK_NOT_FOUND`, a nonfolder parent `BOOKMARK_PARENT_NOT_FOLDER`, managed/unmodifiable nodes `BOOKMARK_UNMODIFIABLE`, missing APIs `UNSUPPORTED`, and failed browser operations `BOOKMARKS_OPERATION_FAILED`. Request liveness is checked immediately before each browser mutation. After the browser mutation succeeds, its concrete outcome is preserved even if the deadline elapsed while waiting; read results are still checked after completion. A browser failure after mutation invocation includes `details:{stateMayHaveChanged:true}`. Inspect current state before retrying and never retry a mutation automatically after an unknown outcome.
 
-The extension manifest requires `history` and `bookmarks` APIs and declares the Firefox data categories `browsingActivity` and `bookmarksInfo`. History/bookmark metadata access operates while MCP is enabled under these extension permissions; page-content approval continues to govern website DOM reads and exports. Reload the add-on and restart the client's MCP connection after updating to discover all 35 tools and activate the new permissions. `npm run test:firefox-history-bookmarks` runs the optional actual-Firefox test in a dedicated headless profile under `work/`, with its own history/bookmark fixtures; it requires Firefox and local `web-ext` development dependencies. Test outcomes are recorded separately in `TESTING.md`.
+The extension manifest requires `history` and `bookmarks` APIs and declares the Firefox data categories `browsingActivity` and `bookmarksInfo`. History/bookmark metadata access operates while MCP is enabled under these extension permissions; page-content approval continues to govern website DOM reads and exports. Reload the add-on and restart the client's MCP connection after updating to discover all 41 tools and activate the new permissions. `npm run test:firefox-history-bookmarks` runs the optional actual-Firefox test in a dedicated headless profile under `work/`, with its own history/bookmark fixtures; it requires Firefox and local `web-ext` development dependencies. Test outcomes are recorded separately in `TESTING.md`.
 
 ## Page exports and waits
 

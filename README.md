@@ -1,6 +1,6 @@
 # Firefox ↔ Codex MCP
 
-Der Entwicklungsstand **1.0.8** enthält strukturierten DOM-Zugriff, getrennt freigegebene Seitenbedienung und eine vollständige Einstellungsseite für dauerhafte Seitenfilter. Freie JavaScript-Ausführung ist nicht verfügbar. Die neu gebauten ZIPs in `dist` sind unsigniert; zum Testen die lokale `extension/manifest.json` temporär laden. Für dauerhafte Installation die neue Version zunächst bei Mozilla signieren lassen.
+Der Entwicklungsstand **1.0.9** enthält strukturierten DOM-Zugriff, getrennt freigegebene Seitenbedienung und eine vollständige Einstellungsseite für dauerhafte Seitenfilter. Freie JavaScript-Ausführung ist nicht verfügbar. Die neu gebauten ZIPs in `dist` sind unsigniert; zum Testen die lokale `extension/manifest.json` temporär laden. Für dauerhafte Installation die neue Version zunächst bei Mozilla signieren lassen.
 
 Firefox-Erweiterung und lokaler MCP-Server für die vorhandenen Firefox-Fenster, Tabs, nativen Tabgruppen, installierten Erweiterungen, Chronik, Lesezeichen und Seiteninhalte. Die Verbindung nutzt Firefox Native Messaging, einen ausschließlich an `127.0.0.1` gebundenen Host mit Zugriffstoken und MCP über Standard-Ein-/Ausgabe. Es ist kein OpenAI-API-Schlüssel nötig.
 
@@ -158,11 +158,12 @@ Pro Zeile steht ein Muster mit Typ, beispielsweise `domain example.org` (einschl
 
 ## Werkzeuge
 
-Alle 35 Werkzeugnamen haben das Präfix `firefox_`:
+Alle 41 Werkzeugnamen haben das Präfix `firefox_`:
 
 | Bereich | Namen ohne Präfix |
 | --- | --- |
 | Status und Übersicht | `status`, `get_current`, `list_windows`, `list_tabs`, `get_tabs` |
+| Technische Diagnose (lesend) | `get_environment`, `get_processes`, `monitor_resources`, `get_network_state`, `diagnostics_snapshot`, `diagnose_tab` |
 | Installierte Erweiterungen | `list_extensions` |
 | Chronik | `search_history` |
 | Lesezeichen und Ordner | `list_bookmark_folders`, `search_bookmarks`, `create_bookmark`, `update_bookmark`, `move_bookmark`, `delete_bookmark` |
@@ -173,6 +174,8 @@ Alle 35 Werkzeugnamen haben das Präfix `firefox_`:
 | DOM lesen und Seitenelemente bedienen | `read_dom`, `interact` |
 | Auf Seitenzustand warten | `wait_for` |
 | Seitenexport | `save_png`, `save_html`, `save_pdf` |
+
+Die sechs Diagnosewerkzeuge ab **1.0.9** benötigen nur aktives MCP, keine Inhalts- oder Bedienfreigabe. Sie lesen weder DOM noch Seitentext und geben keine Tabtitel, URLs, Netzwerkadressen, Kommandozeilen, Header, Cookies oder Request-Inhalte aus. Browser-Version und Erweiterungsinventar behalten ihre bestehende separate Freigabe; Erweiterungen werden weiterhin über `list_extensions` abgefragt. Weitere Details: [Technische Diagnose](docs/Diagnose.md). Nach dem Update Add-on neu laden und die MCP-Verbindung im KI-Client neu starten, damit der Native Host den neuen Code lädt und alle 41 Werkzeuge bekannt werden.
 
 Beispiele für Codex: „Liste alle entladenen Firefox-Tabs“, „Finde Tabs mit localhost in der URL“, „Schalte diese drei Tabs stumm“, „Verschiebe die ausgewählten Tabs in ein neues Fenster“, „Fasse den Inhalt des aktiven Tabs zusammen“. IDs zunächst anhand der Übersicht oder einer gezielten Suche auflösen. `list_tabs` unterstützt Fenster, Aktivität, Audio, Stummschaltung, Entladezustand und Gruppe als Filter; Standard sind 100, maximal 500 Tabs pro Seite mit `offset`/`limit`.
 

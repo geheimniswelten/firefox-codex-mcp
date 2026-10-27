@@ -1,7 +1,7 @@
-﻿/* Shared as a plain background script and a side-effect module in Node tests. */
+/* Shared as a plain background script and a side-effect module in Node tests. */
 (() => {
   "use strict";
-  const VERSION = "1.0.8";
+  const VERSION = "1.0.9";
   const SESSION_KEY = "firefox-codex-mcp.metadata.v1";
   const MAX_RESPONSE_BYTES = 800000; // Leave room for the native RPC envelope.
   const COLORS = ["blue", "cyan", "grey", "green", "orange", "pink", "purple", "red", "yellow"];
@@ -16,6 +16,7 @@
   const validISO = (value) => typeof value === "string" && value.length < 40 && Number.isFinite(Date.parse(value));
   const size = (value) => new TextEncoder().encode(JSON.stringify(value)).length;
   const METHODS = {
+    get_environment: [], get_processes: [], get_network_state: [], diagnostics_snapshot: [], diagnose_tab: ["tabId"], monitor_resources: ["durationMs"],
     status: [], get_current: [], list_windows: ["populate"],
     list_extensions: ["enabled", "type", "limit", "offset"],
     list_tabs: ["windowId", "active", "audible", "muted", "discarded", "groupId", "query", "searchIn", "matchMode", "caseSensitive", "limit", "offset"],
@@ -47,6 +48,8 @@
     if (!own(METHODS, method)) throw new BridgeError("METHOD_NOT_FOUND", "Unbekannte Firefox-Methode.");
     if (!p || typeof p !== "object" || Array.isArray(p)) fail("params muss ein Objekt sein.");
     for (const key of Object.keys(p)) if (!METHODS[method].includes(key)) fail(`Unbekannter Parameter: ${key}`);
+    if (method === "diagnose_tab" && !own(p, "tabId")) fail("tabId ist erforderlich.");
+    if (own(p, "durationMs") && (!Number.isInteger(p.durationMs) || p.durationMs < 1000 || p.durationMs > 10000)) fail("durationMs muss zwischen 1000 und 10000 liegen.");
     if (["read_dom", "interact"].includes(method)) {
       if (!globalThis.FirefoxBridgeDom) throw new BridgeError("UNSUPPORTED", "DOM-Zugriff benötigt die aktualisierte Firefox-Erweiterung.");
       globalThis.FirefoxBridgeDom.validate(method, p); return;
@@ -277,6 +280,30 @@
       context.assertLive?.();
       const p = params;
       switch (method) {
+        case "get_environment": case "get_processes": case "get_network_state": case "diagnostics_snapshot": case "diagnose_tab": case "monitor_resources": {
+          const result = { measuredAt: new Date().toISOString(), source: "webextension:tabs", readOnly: true, pageContentRead: false,
+            unavailable: ["Firefox internal unload priorities", "Per-tab CPU and RAM attribution", "JavaScript errors and stacks", "HTTP request timings and DNS diagnostics", "Detailed memory reports and profiler data", "Third-party modules and enterprise policies"] };
+          if (["get_environment", "diagnostics_snapshot"].includes(method)) {
+            const permissions = browser.permissions?.getAll ? await browser.permissions.getAll() : {};
+            result.inventoryConsent = permissions.data_collection?.includes("technicalAndInteraction") === true;
+            if (result.inventoryConsent && browser.runtime.getBrowserInfo) {
+              const info = await browser.runtime.getBrowserInfo();
+              const current = await browser.permissions.getAll();
+              if (current.data_collection?.includes("technicalAndInteraction")) result.browser = pick(info, ["name", "vendor", "version", "buildID"]);
+              else result.inventoryConsent = false;
+            }
+          }
+          if (["diagnostics_snapshot", "diagnose_tab"].includes(method)) {
+            const tabs = method === "diagnose_tab" ? [await browser.tabs.get(p.tabId)] : await browser.tabs.query({});
+            result.tabs = { total: tabs.length, active: tabs.filter(tab => tab.active).length, discarded: tabs.filter(tab => tab.discarded).length, loading: tabs.filter(tab => tab.status === "loading").length, audible: tabs.filter(tab => tab.audible).length };
+            if (method === "diagnose_tab") {
+              result.tab = pick(tabs[0], ["id", "active", "discarded", "status", "audible", "pinned", "autoDiscardable"]);
+              result.findings = tabs[0].discarded ? ["TAB_UNLOADED"] : tabs[0].status === "loading" ? ["TAB_CURRENTLY_LOADING_CAUSE_UNKNOWN"] : ["NO_CAUSE_ESTABLISHED_FROM_TAB_METADATA"];
+            }
+          }
+          context.assertLive?.();
+          return result;
+        }
         case "read_dom": case "interact": return dom.handle(method, p, context);
         case "status": {
           const permissions = browser.permissions?.getAll ? await browser.permissions.getAll() : {};

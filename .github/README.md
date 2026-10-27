@@ -27,6 +27,7 @@ Codex freut sich auf deine Befehle :kissing_closed_eyes:
   - Access to page content is blocked by default (permission is requested on first access)
   - Export web pages as PNG and single-file HTML (PDF export is also available, but only opens Firefox’s save dialog)
   - Debugging features: access page content, particularly to develop and test websites locally.
+  - Read-only diagnostics (1.0.9): environment, technical tab status, snapshots and short CPU/RAM measurements. Windows additionally provides Firefox process counters and aggregated TCP connection states. No page text, request contents or network addresses are returned; no page-content or interaction approval is required. Browser version and extension inventory retain their separate consent. Internal Firefox memory reports/profiles and per-tab process attribution are not yet available.
 
   It currently runs through a locally installed MCP server application (STDIO via Node.js),
   as Firefox extension restrictions prevent extensions from running a TCP listener.
@@ -60,6 +61,7 @@ Codex freut sich auf deine Befehle :kissing_closed_eyes:
   - Zugriff auf Seiteninhalte standardmäßig gesperrt (bei Erstzugriff wird nach Freigabe gefragt)
   - Export von Webseiten als PNG und Single-HTML (auch als PDF -> öffnet aber nur den Speichern-Dialog des Firefox)
   - Debugfunktionen: Zugriff auf Seiteninhalte, aber vor allem auch um lokal Webseiten zu entwickeln und zu testen.
+  - Lesende Diagnose (1.0.9): Umgebung, technischer Tabstatus, Snapshots und kurze CPU/RAM-Messungen. Unter Windows zusätzlich Firefox-Prozesswerte und zusammengefasste TCP-Verbindungszustände. Keine Seitentexte, Request-Inhalte oder Netzwerkadressen; keine Inhalts- oder Bedienfreigabe nötig. Browser-Version und Erweiterungsinventar behalten ihre separate Freigabe. Interne Firefox-Speicherberichte/Profile und die Prozesszuordnung zu einzelnen Tabs sind noch nicht verfügbar.
 
   Aktuell läuft es über eine lokal installierte MCP-Serveranwendung (STDIO via Node.js),
   da die Firefox-Einschrängungen für Extension keinen TCP-Listener innerhalb der Extension ermöglichen.
