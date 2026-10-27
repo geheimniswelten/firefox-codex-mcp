@@ -21,12 +21,12 @@ function state(platform = 'linux') {
     hostVersion: '1.0.2', registration: { registrationRevision: 1, installerVersion: '1.0.2', registeredAt: '2026-10-01T12:00:00.000Z', platform, manifestPath: '/example/manifest.json' }, lastConfirmation: null,
   } };
 }
-async function mount(initial = state(), clipboard, download = async () => 1) {
+async function mount(initial = state(), clipboard, download = async () => 1, getSelf = async () => ({ installType: 'normal' })) {
   const window = new Window({ url: 'moz-extension://bridge/setup/setup.html', settings: { enableJavaScriptEvaluation: false, disableCSSFileLoading: true, disableJavaScriptFileLoading: true } });
   window.document.write(html);
   const messages = [], responses = [], downloads = [];
   let current = structuredClone(initial), interval, cleared = false;
-  const browser = { downloads: { async download(options) { downloads.push(structuredClone(options)); return download(options); } }, runtime: {
+  const browser = { management: { getSelf, getAll() { assert.fail('Self detection must not enumerate other add-ons'); } }, downloads: { async download(options) { downloads.push(structuredClone(options)); return download(options); } }, runtime: {
     getURL: file => `moz-extension://bridge/${file}`, onMessage: event(),
     async sendMessage(message) { messages.push(structuredClone(message)); return structuredClone(responses.length ? await responses.shift() : current); },
   } };
@@ -48,6 +48,38 @@ test('options page requests the download API permission and opens in its own tab
   assert.equal(manifest.permissions.includes('clipboardRead'), false);
   assert.equal(manifest.permissions.includes('clipboardWrite'), false);
   assert.equal(manifest.name, 'Codex MCP for Firefox');
+});
+
+test('temporary setup disables packaged registration controls but keeps connection checks available', async () => {
+  const f = await mount(state('win'), undefined, undefined, async () => ({ installType: 'development' }));
+  for (const id of ['platform', 'registerDownload', 'unregisterDownload', 'copyRegisterCommand', 'copyUnregisterCommand', 'registerCommand', 'unregisterCommand']) assert.equal(f.el(id).disabled, true, id);
+  assert.equal(f.el('checkSetup').disabled, false);
+  assert.match(f.el('installationNotice').textContent, /Temporäre Installation.*Entwicklungsverzeichnis.*install\.ps1/u);
+  assert.match(f.el('installationNotice').textContent, /--register-native.*--unregister-native/u);
+  assert.equal(f.el('commandInstructions').hidden, true);
+  f.el('registerDownload').dispatchEvent(new f.window.Event('click'));
+  f.el('unregisterDownload').dispatchEvent(new f.window.Event('click'));
+  await settle(); assert.equal(f.downloads.length, 0);
+  f.select('linux'); await f.refresh();
+  assert.equal(f.el('registerDownload').disabled, true);
+  assert.equal(f.el('registerCommand').value, '');
+  f.el('checkSetup').click(); await settle();
+  assert.ok(f.messages.some(message => message.type === 'bridge_reconnect'));
+  f.close();
+});
+
+test('unresolved or failed installation detection never enables packaged setup', async () => {
+  const pending = deferred();
+  const f = await mount(state('win'), undefined, undefined, () => pending.promise);
+  assert.equal(f.el('registerDownload').disabled, true);
+  pending.reject(new Error('Unavailable')); await settle();
+  assert.equal(f.el('registerDownload').disabled, true);
+  assert.match(f.el('installationNotice').textContent, /konnte nicht bestimmt/u);
+  f.close();
+  for (const type of ['unknown', undefined]) {
+    const unknown = await mount(state('win'), undefined, undefined, async () => ({ installType: type }));
+    assert.equal(unknown.el('registerDownload').disabled, true); unknown.close();
+  }
 });
 
 test('setup shows fresh-install defaults separately from the currently confirmed installation and ignores historical paths', async () => {

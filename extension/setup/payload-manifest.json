@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "version": "1.0.9",
   "registrationRevision": 1,
-  "archiveSha256": "482c445a9397aecf1d42dfd7dc4122b6c10caf129cd3f5db8ea24eddcc84056c",
+  "archiveSha256": "cd7482528d8b176d8b90f9d9c44f91488d95e63c4f1ba6fc94e6e5a9598dca58",
   "files": [
     {
       "path": "LICENSE.md",
@@ -14,7 +14,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "bb7d35dda03a2bb764e5725341a2c7e0693fb930d8cce0438ded015c06a9c6e0"
+      "sha256": "3aa7220fa9931280e3728ef58657586564b2f3ffb18de62af40c2c389919a0dd"
     },
     {
       "path": "install.ps1",

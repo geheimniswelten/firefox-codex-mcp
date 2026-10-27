@@ -7,13 +7,23 @@ function setText(id, value) {
   if (element.textContent !== text) element.textContent = text;
 }
 let selectedPlatform = false, statusRequestId = 0, copyRequestId = 0, checking = false, downloading = false, currentState = null;
+let installationType = null;
+const packagedSetupAllowed = () => ["normal", "admin", "sideload", "other"].includes(installationType);
 const dateText = value => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString("de-DE") : "Noch nicht bestätigt";
 function renderDownloads() {
   const platform = el("platform").value;
   const supported = ["win", "linux", "mac"].includes(platform);
+  const allowed = packagedSetupAllowed();
+  el("platform").disabled = !allowed;
+  for (const id of ["copyRegisterCommand", "copyUnregisterCommand", "registerCommand", "unregisterCommand"]) el(id).disabled = !allowed || !supported;
+  setText("installationNotice", installationType === "development"
+    ? "Temporäre Installation: Registrierung und Deregistrierung über dieses Erweiterungspaket sind deaktiviert. Führe stattdessen im Entwicklungsverzeichnis unter Windows install.ps1 beziehungsweise uninstall.ps1 aus. Unter Linux/macOS verwende node scripts/setup.mjs --register-native beziehungsweise node scripts/setup.mjs --unregister-native. Die Verbindungsprüfung und Seitenfilter bleiben verfügbar."
+    : allowed ? "Dauerhafte Installation: Die Einrichtungsskripte aus diesem Paket sind verfügbar."
+      : installationType === null ? "Installationsart wird geprüft. Die Registrierungsskripte sind bis dahin gesperrt."
+        : "Installationsart konnte nicht bestimmt werden. Die Registrierungsskripte bleiben gesperrt. Öffne diese Einstellungsseite erneut oder verwende die Skripte im Entwicklungsverzeichnis.");
   for (const id of ["registerDownload", "unregisterDownload"]) {
     const button = el(id);
-    button.disabled = !supported || downloading;
+    button.disabled = !allowed || !supported || downloading;
     button.setAttribute("aria-disabled", String(button.disabled));
   }
   setText("registerDownload", currentState?.setup?.status === "update_required" ? "Aktualisierungsskript speichern" : "Registrierungsskript speichern");
@@ -24,12 +34,12 @@ function renderDownloads() {
   const suffix = platform === "win" ? /[\\/]\.local[\\/]de\.codex\.firefox_bridge\.json$/iu : /\/\.local\/de\.codex\.firefox_bridge\.json$/u;
   setText("existingInstallPath", typeof manifestPath === "string" && suffix.test(manifestPath)
     ? manifestPath.replace(suffix, "") : "Noch nicht bestätigt; das Skript ermittelt eine vorhandene Registrierung beim Ausführen.");
-  el("commandInstructions").hidden = !supported;
+  el("commandInstructions").hidden = !allowed || !supported;
   setText("commandIntro", platform === "win"
     ? "Öffne PowerShell im Ordner der gespeicherten Skripte."
     : "Öffne ein Terminal im Ordner der gespeicherten Skripte.");
   for (const [id, script] of [["registerCommand", "register"], ["unregisterCommand", "unregister"]]) {
-    const command = !supported ? "" : platform === "win"
+    const command = !allowed || !supported ? "" : platform === "win"
       ? "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\" + script + ".ps1"
       : "sh " + script + ".sh";
     // Keep an existing selection intact during the regular status refresh.
@@ -47,7 +57,7 @@ function renderDownloads() {
 }
 async function downloadScript(script) {
   const platform = el("platform").value;
-  if (downloading || !["win", "linux", "mac"].includes(platform)) return;
+  if (!packagedSetupAllowed() || downloading || !["win", "linux", "mac"].includes(platform)) return;
   const filename = `${script}.${platform === "win" ? "ps1" : "sh"}`;
   const status = el("downloadStatus");
   downloading = true;
@@ -68,6 +78,7 @@ async function downloadScript(script) {
   }
 }
 async function copyCommand(id, label) {
+  if (!packagedSetupAllowed()) return;
   const field = el(id), command = field.value;
   if (!command) return;
   const requestId = ++copyRequestId;
@@ -125,5 +136,9 @@ el("checkSetup").addEventListener("click", async () => {
 function statusChanged(message) { if (message?.type === "bridge_status_changed") request(); }
 browser.runtime.onMessage.addListener(statusChanged);
 request(); renderDownloads();
+// Self-information needs neither extension-inventory consent nor page access.
+Promise.resolve().then(() => browser.management.getSelf()).then(info => {
+  installationType = typeof info?.installType === "string" ? info.installType : "unknown";
+}).catch(() => { installationType = "unknown"; }).finally(renderDownloads);
 const refresh = setInterval(() => request(), 1500);
 window.addEventListener("unload", () => { clearInterval(refresh); browser.runtime.onMessage.removeListener(statusChanged); });

@@ -158,6 +158,8 @@ Pro Zeile steht ein Muster mit Typ, beispielsweise `domain example.org` (einschl
 
 ## Werkzeuge
 
+Die Einrichtungsseite erkennt temporäre Installationen über `management.getSelf().installType`. Bei `development` sind die paketierten Registrierungs-/Deregistrierungsdownloads, deren Kopierbefehle und die Plattformauswahl deaktiviert. Stattdessen wird auf `install.ps1` / `uninstall.ps1` im Entwicklungsverzeichnis beziehungsweise `node scripts/setup.mjs --register-native` / `--unregister-native` unter Linux/macOS verwiesen. Verbindungsprüfung und Seitenfilter bleiben verfügbar. Solange die Installationsart nicht zuverlässig bestimmt ist, bleiben die Paketinstaller ebenfalls gesperrt. Für diese Selbstauskunft ist keine Inventarfreigabe nötig.
+
 Alle 41 Werkzeugnamen haben das Präfix `firefox_`:
 
 | Bereich | Namen ohne Präfix |
