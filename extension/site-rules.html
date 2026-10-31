@@ -12,6 +12,7 @@
   <h1>Seitenfilter</h1>
   <p>Diese Regeln gelten für Seiteninhalte und Bedienaktionen. Allgemeine Tabinformationen wie Titel und URL bleiben bei aktivem MCP verfügbar.</p>
   <p>Pro Zeile ein Muster mit Typ: <code>domain example.org</code> (einschließlich Subdomains), <code>host www.example.org</code> (exakter Host) oder <code>url https://example.org/privat</code> (Pfad einschließlich Unterpfaden). <code>*</code> ist ein Platzhalter. URL-Parameter und Fragmente werden nicht ausgewertet.</p>
+  <p>Ein Pfad wie <code>/aaa</code> erfasst auch <code>/aaa/bbb</code>, aber nicht <code>/aaabcd</code>; dafür ist <code>/aaa*</code> nötig. Leerzeichen und <code>%20</code> sind gleichwertig. Auch abschließende Leerzeichen im URL-Pfad bleiben beim Speichern als <code>%20</code> erhalten. Ein <code>+</code> im Pfad bleibt ein Pluszeichen.</p>
   <form id="rulesForm">
     <label for="blocked">Seiteninhalte und Bedienung verweigern</label>
     <textarea id="blocked" rows="6" spellcheck="false" disabled></textarea>

@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { Window } from 'happy-dom';
+import '../extension/policy.js';
+
+const { normalizeSiteRules, compileSitePattern } = globalThis.FirefoxBridgePolicy;
 
 const html = await readFile(new URL('../extension/site-rules.html', import.meta.url), 'utf8');
 const source = await readFile(new URL('../extension/site-rules.js', import.meta.url), 'utf8');
@@ -24,7 +27,7 @@ async function mount(t) {
     calls.push(structuredClone(message));
     if (message.type === 'bridge_site_rules') {
       if (fail) throw new Error('Die Seitenfilter wurden inzwischen geändert.');
-      state.siteRules = message.siteRules; state.siteRulesRevision++;
+      state.siteRules = normalizeSiteRules(message.siteRules); state.siteRulesRevision++;
     }
     return structuredClone(state);
   } } } }));
@@ -49,6 +52,28 @@ test('invalid lines and rejected stale writes preserve edits and show errors', a
   assert.equal(f.el('blocked').value, 'domain changed.test');
   assert.equal(f.el('error').hidden, false); assert.match(f.el('error').textContent, /inzwischen geändert/u);
   assert.equal(f.el('save').disabled, false);
+});
+
+test('saving and reloading URL rules preserves meaningful trailing path spaces in every list', async t => {
+  const f = await mount(t);
+  for (const key of ['blocked', 'readOnly', 'fullAccess']) {
+    f.el(key).value = '  url example.org/Meine Datei  \n\nurl example.org/Andere%20Datei%20';
+  }
+  await f.save();
+  for (const key of ['blocked', 'readOnly', 'fullAccess']) {
+    assert.deepEqual(f.calls[1].siteRules[key], [
+      { type: 'url', value: 'example.org/Meine Datei  ' },
+      { type: 'url', value: 'example.org/Andere%20Datei%20' },
+    ]);
+    assert.equal(f.el(key).value, 'url example.org/Meine%20Datei%20%20\nurl example.org/Andere%20Datei%20');
+    const matches = compileSitePattern(f.state.siteRules[key][0]);
+    assert.equal(matches(new URL('https://example.org/Meine%20Datei%20%20')), true);
+    assert.equal(matches(new URL('https://example.org/Meine%20Datei')), false, 'saving must not broaden the rule');
+  }
+  const savedRules = structuredClone(f.state.siteRules);
+  f.el('reload').click(); await settle();
+  await f.save();
+  assert.deepEqual(f.state.siteRules, savedRules, 'loading and saving again preserves the same rules');
 });
 test('reloading edited rules requires confirmation and cancelled reload keeps edits', async t => {
   const f = await mount(t);

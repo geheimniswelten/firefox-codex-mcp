@@ -29,7 +29,8 @@
   function readRules() {
     return Object.fromEntries(keys.map(key => [key, el(key).value.split(/\r?\n/u).flatMap((line, index) => {
       if (!line.trim()) return [];
-      const match = /^(domain|host|url)\s+(.+)$/u.exec(line.trim());
+      // Trailing URL path spaces are meaningful and normalize to %20.
+      const match = /^(domain|host|url)\s+(.+)$/u.exec(line.trimStart());
       if (!match) throw new Error(`${el(key).labels[0].textContent}, Zeile ${index + 1}: Bitte domain, host oder url vor das Muster setzen.`);
       return [{ type: match[1], value: match[2] }];
     })]));
