@@ -9,6 +9,18 @@ import { NativeDecoder, encodeNativeMessage, MAX_NATIVE_BYTES } from '../server/
 
 const TOKEN = 'ab'.repeat(32);
 
+test('native listener checks shared reservations before binding and does not silently select a different port', async t => {
+  const input = new PassThrough(), output = new PassThrough();
+  let checks = 0;
+  const bridge = createBridge({ port: 38477, token: TOKEN, input, output, portManager: async (action, options) => {
+    checks++; assert.equal(action, 'check'); assert.equal(options.port, 38477);
+    throw Object.assign(new Error('reserved for another user'), { code: 'PORT_RESERVED' });
+  } });
+  t.after(() => { bridge.close(); input.destroy(); output.destroy(); });
+  await assert.rejects(bridge.listen(), { code: 'PORT_RESERVED' });
+  assert.equal(checks, 1);
+});
+
 test('native framing handles fragmented, coalesced and Unicode packets', () => {
   const messages = [];
   const decoder = new NativeDecoder(message => messages.push(message));

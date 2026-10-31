@@ -44,6 +44,8 @@ Codex freut sich auf deine Befehle :kissing_closed_eyes:
 
   TODO: Since Linux is not an option with Delphi Professional, and supporting macOS would therefore not be worth the effort either, this will take a little longer. <br/>
   I need to migrate or finish two other projects first, then use Free Pascal to package the **local MCP server as a single executable**.
+
+  I do not collect any data myself, but Firefox tracks the number of downloads and users per day, as well as their browser version and platform (Windows/Linux/macOS/other).
 </details>
 
 ---
@@ -77,6 +79,8 @@ Codex freut sich auf deine Befehle :kissing_closed_eyes:
   
   TODO: Da Linux mit Delphi (Prof) nicht möglich ist, und der Aufwand für MacOS sich daher eh nicht nicht lohnt, dauert es noch ein Weilchen. <br/>
   Vorher noch zwei andere Projekte umzustellen/fertigstellen und dann mit FreePascal den **lokalen MCP-Server als Single-EXE** bereitzustellen.
+
+  Ich selbst erfasse keine Daten, aber Firefox zählt die Downloads und Nutzer pro Tag, sowie deren Browserversion und Plattform (Windows/Linux/macOS/Andere).
 </details>
 
 ---

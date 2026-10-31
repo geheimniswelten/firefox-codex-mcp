@@ -9,6 +9,7 @@ const companionFiles = [
   'install.ps1', 'uninstall.ps1', 'scripts/node-runtime.ps1', 'scripts/open-firefox-setup.ps1', 'scripts/finish-relocation.ps1',
   'scripts/setup.mjs', 'scripts/registration.mjs', 'scripts/install-companion.mjs',
   'scripts/companion-payload.mjs', 'scripts/client-config.mjs', 'scripts/configure-clients.mjs',
+  'scripts/ports.mjs', 'scripts/windows-port-reservation.ps1', 'scripts/windows-port-reservation.cs', 'PORT_RESERVATION.md',
 ];
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 

@@ -5,6 +5,8 @@ param(
     [switch]$NoDownload,
     [switch]$NoOpenFirefox,
     [switch]$NoRegisterClients,
+    [switch]$ReservePort,
+    [switch]$NoPortReservationPrompt,
     [switch]$OpenFirefoxOnly,
     [string]$ReplaceNativeManifest
 )
@@ -58,6 +60,23 @@ try {
         $previousNativeManifest = Get-FirefoxPreviousManifest
     }
     $setupArgs = @((Join-Path $projectRoot 'scripts\setup.mjs'))
+    $portArgs = @((Join-Path $projectRoot 'scripts\ports.mjs'), 'status', '--root', $projectRoot, '--json')
+    if ($PSBoundParameters.ContainsKey('Port')) { $portArgs += @('--port', "$Port") }
+    $portStatusText = & $runtime.NodePath @portArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Gemeinsame Portverwaltung konnte nicht geprueft werden; Konfiguration bleibt unveraendert.' }
+    $portStatus = ($portStatusText -join "`n") | ConvertFrom-Json
+    if (-not $GenerateOnly -and -not $ReservePort -and -not $NoPortReservationPrompt -and $portStatus.windowsServer -and @($portStatus.ownPorts) -notcontains $portStatus.port) {
+        Write-Host ('Windows Server: Port ' + $portStatus.port + ' ist noch nicht fuer diesen Benutzer/Firefox MCP vorgemerkt.')
+        Write-Host 'Die gemeinsame Portverwaltung stimmt Ports mit DAI und anderen Windows-Benutzern ab.'
+        if ([Console]::IsInputRedirected) { throw 'Nicht-interaktiv auf Windows Server: -ReservePort oder -NoPortReservationPrompt ausdruecklich angeben.' }
+        $portChoice = Read-Host 'Diesen Port dauerhaft vormerken? [J]a / [N]ein / [A]bbrechen'
+        if ($portChoice -match '^(?i:j|ja|y|yes)$') { $ReservePort = $true }
+        elseif ($portChoice -notmatch '^(?i:n|nein|no)$') { throw 'Einrichtung abgebrochen; keine Portkonfiguration geaendert.' }
+    }
+    if ($ReservePort) { $setupArgs += '--reserve-port' }
+    elseif (-not $GenerateOnly -and -not $portStatus.windowsServer) {
+        Write-Host 'Optionale gemeinsame Windows-Portverwaltung: install.ps1 -ReservePort (Details: PORT_RESERVATION.md).'
+    }
     if ($PSBoundParameters.ContainsKey('Port')) { $setupArgs += @('--port', "$Port") }
     if (-not $GenerateOnly) { $setupArgs += '--register-native' }
     if ($PSBoundParameters.ContainsKey('ReplaceNativeManifest')) { $setupArgs += @('--replace-native-manifest', $ReplaceNativeManifest) }

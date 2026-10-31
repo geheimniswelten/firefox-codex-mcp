@@ -1,4 +1,4 @@
-# DOM lesen und bedienen (Entwicklungsstand 1.0.8)
+# DOM lesen und bedienen (Entwicklungsstand 1.0.9)
 
 `firefox_read_dom` liest sichtbaren Text und Eingaben, Checkboxen, Radio-Buttons,
 Auswahlfelder, Buttons, Links und explizit editierbare Bereiche. Es liefert

@@ -25,10 +25,21 @@ test('native setup report still arrives when HTTP port is occupied', async t => 
   await new Promise(resolve => occupied.listen(0, '127.0.0.1', resolve));
   const input = new PassThrough(), output = new PassThrough(), messages = [];
   output.on('data', bytes => new NativeDecoder(message => messages.push(message)).push(bytes));
-  const bridge = createBridge({ port: occupied.address().port, token: 'ab'.repeat(32), input, output });
+  const bridge = createBridge({ port: occupied.address().port, token: 'ab'.repeat(32), input, output, portManager: async () => ({ exists: false }) });
   t.after(() => { bridge.close(); occupied.close(); input.destroy(); output.destroy(); });
   await assert.rejects(bridge.listen(), { code: 'EADDRINUSE' });
   assert.equal(messages.length, 1);
   assert.equal(messages[0].type, 'setup_status');
   assert.equal(messages[0].registration, null);
+});
+
+test('native setup report also precedes a shared-port conflict without binding or modifying reservations', async t => {
+  const input = new PassThrough(), output = new PassThrough(), messages = [];
+  const decoder = new NativeDecoder(message => messages.push(message));
+  output.on('data', bytes => decoder.push(bytes));
+  const bridge = createBridge({ port: 38477, token: 'ab'.repeat(32), input, output, portManager: async () => { throw Object.assign(new Error('foreign port'), { code: 'PORT_RESERVED' }); } });
+  t.after(() => { bridge.close(); input.destroy(); output.destroy(); });
+  await assert.rejects(bridge.listen(), { code: 'PORT_RESERVED' });
+  assert.deepEqual(messages.map(message => message.type), ['setup_status']);
+  assert.equal(bridge.server.listening, false);
 });

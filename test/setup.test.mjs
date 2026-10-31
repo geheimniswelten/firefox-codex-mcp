@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { assertRegistrationCompatible, prepareSetup, unregisterSetup, main, tomlLiteral } from '../scripts/setup.mjs';
+import { assertRegistrationCompatible, prepareSetup as prepareRealSetup, unregisterSetup, main, tomlLiteral } from '../scripts/setup.mjs';
 import { HOST_NAME, REGISTRATION_REVISION, INSTALLER_VERSION, readRegistrationStatus, registrationStatusPath } from '../scripts/registration.mjs';
+
+// Setup fixtures must never read or change the machine's real shared inventory.
+const prepareSetup = options => prepareRealSetup({ portManager: async () => ({ supported: true, exists: false, changed: false, ownPorts: [] }), ...options });
 
 async function cleanupTemporaryRoot(root) {
   assert.equal(dirname(resolve(root)), resolve(tmpdir()));

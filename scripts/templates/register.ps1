@@ -2,6 +2,8 @@ param(
     [string]$ProjectRoot,
     [switch]$NoDownload,
     [switch]$NoRegisterClients,
+    [switch]$ReservePort,
+    [switch]$NoPortReservationPrompt,
     [ValidateRange(1024, 65535)][int]$Port = 38477,
     [switch]$Help
 )
@@ -63,7 +65,7 @@ function Expand-FirefoxSetupPayload {
 }
 
 if ($Help) {
-    Write-Host 'register.ps1 [-ProjectRoot ABSOLUTE_DIRECTORY] [-NoDownload] [-NoRegisterClients] [-Port 38477]'
+    Write-Host 'register.ps1 [-ProjectRoot ABSOLUTE_DIRECTORY] [-NoDownload] [-NoRegisterClients] [-Port 38477] [-ReservePort] [-NoPortReservationPrompt]'
     Write-Host 'Installs/updates a local Node.js MCP server and native host, then registers Firefox and supported AI clients.'
     Write-Host 'Server and npm dependencies: about 22 MB, plus Node.js if downloaded. Existing server/setup source files may be replaced.'
     exit 0
@@ -78,6 +80,8 @@ try {
     $arguments = @{ NoOpenFirefox = $true }
     if ($NoDownload) { $arguments.NoDownload = $true }
     if ($NoRegisterClients) { $arguments.NoRegisterClients = $true }
+    if ($ReservePort) { $arguments.ReservePort = $true }
+    if ($NoPortReservationPrompt) { $arguments.NoPortReservationPrompt = $true }
     if ($PSBoundParameters.ContainsKey('Port')) { $arguments.Port = $Port }
     & (Join-Path $root 'install.ps1') @arguments
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

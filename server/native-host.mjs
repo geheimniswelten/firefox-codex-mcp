@@ -5,6 +5,7 @@ import { configPathFromArgs, loadConfig } from './config.mjs';
 import { encodeNativeMessage, NativeDecoder } from './framing.mjs';
 import { readRegistrationStatus } from '../scripts/registration.mjs';
 import { createDiagnostics, DIAGNOSTIC_METHODS } from './diagnostics.mjs';
+import { managePortReservation } from './port-reservation.mjs';
 
 export const HOST_VERSION = '1.0.9';
 export const PROTOCOL_VERSION = 1;
@@ -21,7 +22,7 @@ function reply(response, status, body) {
 }
 
 // This HTTP endpoint is a private IPC bridge, not a network MCP endpoint.
-export function createBridge({ port, token, registration = null, input = process.stdin, output = process.stdout, timeoutMs = 30_000, contentTimeoutMs = 130_000, exportTimeoutMs = 280_000, collectDiagnostics = createDiagnostics() }) {
+export function createBridge({ port, token, registration = null, input = process.stdin, output = process.stdout, timeoutMs = 30_000, contentTimeoutMs = 130_000, exportTimeoutMs = 280_000, collectDiagnostics = createDiagnostics(), portManager = managePortReservation }) {
   if (!Number.isInteger(exportTimeoutMs) || exportTimeoutMs < 1 || exportTimeoutMs > 600_000) throw new Error('Export timeout must be from 1 to 600000 milliseconds.');
   const pending = new Map();
   let ready = false;
@@ -170,6 +171,8 @@ export function createBridge({ port, token, registration = null, input = process
       // Report setup separately from the HTTP bridge. A occupied port must not
       // hide a confirmed companion installation or appear as missing setup.
       send({ type: 'setup_status', hostVersion: HOST_VERSION, protocolVersion: PROTOCOL_VERSION, registration });
+      if (port > 0) await portManager('check', { port });
+      if (closed) throw new Error('Firefox disconnected during port validation.');
       await new Promise((resolve, reject) => {
         server.once('error', reject);
         server.listen(port, '127.0.0.1', () => { server.removeListener('error', reject); resolve(); });
@@ -191,7 +194,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     try { await bridge.listen(); }
     catch (err) {
       bridge.close();
-      console.error(err.code === 'EADDRINUSE' ? 'Bridge port is occupied. Enable this extension in only one Firefox profile, or select another installation port.' : 'Native host failed to start.');
+      console.error(err.code === 'EADDRINUSE' ? 'Bridge port is occupied. Enable this extension in only one Firefox profile, or select another installation port. Windows multi-user setup: node scripts/ports.mjs suggest' : err.code?.startsWith('PORT_') || err.code?.includes('_PORT') ? `${err.code}: ${err.message}` : 'Native host failed to start.');
       process.exitCode = 1;
     }
   } catch (err) { console.error(err.message); process.exitCode = 1; }

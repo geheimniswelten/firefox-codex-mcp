@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { managePortReservation } from '../server/port-reservation.mjs';
 import { HOST_NAME, EXTENSION_ID, REGISTRATION_REVISION, INSTALLER_VERSION, registrationPlatform, registerNativeHost, unregisterNativeHost, writeRegistrationStatus, removeRegistrationStatus } from './registration.mjs';
 
 export { HOST_NAME, EXTENSION_ID };
@@ -89,7 +90,7 @@ export function assertRegistrationCompatible(existingPath, manifestPath, platfor
   }
 }
 
-export async function prepareSetup({ root = defaultRoot, nodePath = process.execPath, port, register = false, replaceManifestPath, platform = process.platform, home, registryAdapter, now = Date.now } = {}) {
+export async function prepareSetup({ root = defaultRoot, nodePath = process.execPath, port, register = false, reservePort = false, replaceManifestPath, platform = process.platform, home, registryAdapter, now = Date.now, portManager = managePortReservation } = {}) {
   root = resolve(root);
   const launcherPlatform = registrationPlatform(platform);
   if (replaceManifestPath !== undefined) {
@@ -115,6 +116,10 @@ export async function prepareSetup({ root = defaultRoot, nodePath = process.exec
     config = { port: 38477, token: randomBytes(32).toString('hex') };
   }
   if (port !== undefined) config.port = port;
+  // Check foreign reservations before changing config or registering anything.
+  // An existing own reservation opts subsequent explicit port changes into the
+  // same shared management. Previous ports remain reserved until explicit release.
+  const portReservation = await portManager(reservePort ? 'reserve' : 'prepare', { port: config.port, platform });
   await writePrivate(configPath, `${JSON.stringify(config, null, 2)}\n`);
 
   const nativePath = join(root, 'server', 'native-host.mjs');
@@ -155,7 +160,7 @@ export async function prepareSetup({ root = defaultRoot, nodePath = process.exec
     registration = await registerNativeHost({ manifestPath, replaceManifestPath, relocate: true, platform, home, registryAdapter });
     registrationStatus = await writeRegistrationStatus(configPath, { schemaVersion: 1, registrationRevision: REGISTRATION_REVISION, installerVersion: INSTALLER_VERSION, registeredAt: new Date(now()).toISOString(), platform: registration.platform, manifestPath, registrationPath: registration.registrationPath });
   }
-  return { local, configPath, manifestPath, launcherPath, codexPath, port: config.port, registered: register, registrationPath: registration?.registrationPath ?? null, previousManifestPath: registration?.previousManifestPath ?? null, registrationBackupPath: registration?.backupPath ?? null, registrationStatus };
+  return { local, configPath, manifestPath, launcherPath, codexPath, port: config.port, portReservation, registered: register, registrationPath: registration?.registrationPath ?? null, previousManifestPath: registration?.previousManifestPath ?? null, registrationBackupPath: registration?.backupPath ?? null, registrationStatus };
 }
 
 export async function unregisterSetup({ root = defaultRoot, platform = process.platform, home, registryAdapter, dryRun = false } = {}) {
@@ -173,6 +178,7 @@ export async function main(args = process.argv.slice(2)) {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--register-native') options.register = true;
+    else if (arg === '--reserve-port') options.reservePort = true;
     else if (arg === '--replace-native-manifest') {
       const value = args[++index];
       if (!value || !isAbsolute(value) || /[\u0000-\u001f\u007f]/u.test(value)) throw new Error('--replace-native-manifest erwartet den absoluten bisherigen Manifestpfad.');
@@ -190,18 +196,19 @@ export async function main(args = process.argv.slice(2)) {
       if (!raw || !/^\d+$/u.test(raw)) throw new Error('--port erwartet eine Portnummer.');
       options.port = Number(raw);
     } else if (arg === '--help') {
-      console.log('node scripts/setup.mjs [--root ABSOLUTER_PFAD] [--port 38477] [--register-native [--replace-native-manifest ALTER_ABSOLUTER_MANIFESTPFAD]]\nnode scripts/setup.mjs [--root ABSOLUTER_PFAD] --unregister-native [--dry-run]\nOhne --register-native werden ausschließlich Projektdateien erzeugt.');
+      console.log('node scripts/setup.mjs [--root ABSOLUTER_PFAD] [--port 38477] [--reserve-port] [--register-native [--replace-native-manifest ALTER_ABSOLUTER_MANIFESTPFAD]]\nnode scripts/setup.mjs [--root ABSOLUTER_PFAD] --unregister-native [--dry-run]\n--reserve-port: Windows-Port gemeinsam mit DAI vormerken. Bestehende eigene Vormerkungen werden bei Portänderungen fortgeführt. Ohne --register-native keine Native-Host-Registrierung.');
       return;
     } else throw new Error(`Unbekannte Option: ${arg}`);
   }
   if (unregister) {
-    if (options.register || options.port !== undefined || options.replaceManifestPath !== undefined) throw new Error('--unregister-native darf nicht mit Registrierung, Manifestaustausch oder --port kombiniert werden.');
+    if (options.register || options.reservePort || options.port !== undefined || options.replaceManifestPath !== undefined) throw new Error('--unregister-native darf nicht mit Registrierung, Portreservierung, Manifestaustausch oder --port kombiniert werden.');
     const result = await unregisterSetup(options);
     console.log(`${result.dryRun ? 'Vorschau: ' : ''}Native-Host-Registrierung ${result.changed ? result.dryRun ? 'würde entfernt' : 'entfernt' : 'nicht vorhanden'}.\nRegistrierungspfad: ${result.registrationPath}\nProjektdateien und KI-Client-Konfigurationen bleiben erhalten.`);
     return result;
   }
   if (options.dryRun) throw new Error('--dry-run ist nur mit --unregister-native möglich.');
   const result = await prepareSetup(options);
+  if (result.portReservation?.ownPorts.includes(result.port)) console.log(`Gemeinsame Portverwaltung: ${result.port} für FirefoxMCP:http reserviert. Frühere Ports bleiben bis zur ausdrücklichen Freigabe erhalten.`);
   if (result.registrationBackupPath) console.log(`Sicherung der bisherigen Native-Host-Registrierung: ${result.registrationBackupPath}`);
   console.log(`Lokale Konfiguration: ${result.configPath}\nCodex-Konfigurationsvorlage: ${result.codexPath}\nNative-Host-Manifest: ${result.manifestPath}\nPort: ${result.port}\nNative Host registriert: ${result.registered ? 'ja' : 'nein'}\nFirefox-Erweiterung danach laden bzw. neu laden. KI-Clients: scripts/configure-clients.mjs (wird von install.ps1 automatisch ausgefuehrt).`);
 }

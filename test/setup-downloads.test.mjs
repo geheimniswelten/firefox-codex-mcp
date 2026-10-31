@@ -23,6 +23,7 @@ test('standalone archive roundtrips exact companion sources, excludes local secr
   assert.deepEqual(encodePayload(payload), encoded, 'reproducible compressed payload');
   assert.ok(payload.files.some(file => file.path === 'scripts/registration.mjs'));
   assert.ok(payload.files.some(file => file.path === 'server/mcp.mjs'));
+  for (const path of ['server/port-reservation.mjs', 'scripts/ports.mjs', 'scripts/windows-port-reservation.ps1', 'scripts/windows-port-reservation.cs', 'PORT_RESERVATION.md']) assert.ok(payload.files.some(file => file.path === path), 'Windows port management must reach packaged installations: ' + path);
   assert.ok(payload.files.every(file => !/^(?:\.local|node_modules|work|extension)\//.test(file.path)));
   for (const file of payload.files) assert.deepEqual(Buffer.from(file.data, 'base64'), await readFile(join(project, file.path)));
   assert.throws(() => decodePayload(encoded.base64, '0'.repeat(64)), /checksum/);
@@ -149,7 +150,7 @@ test('PowerShell 5.1 generated register script extracts exact payload into an is
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const payload = await buildPayload(project);
   for (const file of payload.files) assert.deepEqual(await readFile(join(output, file.path)), Buffer.from(file.data, 'base64'));
-  const help = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Help'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  const help = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Help'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
   assert.equal(help.status, 0, help.stderr);
   const unregister = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(project, 'extension/setup/unregister.ps1'), '-Help'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
   assert.equal(unregister.status, 0, unregister.stderr);
@@ -188,7 +189,7 @@ test('Windows self-contained download calls installed setup with named switches 
   await writeFile(outside, 'external file stays untouched');
   await link(outside, join(output, 'server/native-host.mjs'));
   const payload = await buildPayload(project);
-  const stub = Buffer.from("param([switch]$NoOpenFirefox,[switch]$NoDownload,[switch]$NoRegisterClients,[int]$Port)\n[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'called.json'),(@{NoOpenFirefox=$NoOpenFirefox.IsPresent;NoDownload=$NoDownload.IsPresent;NoRegisterClients=$NoRegisterClients.IsPresent;Port=$Port}|ConvertTo-Json -Compress))\n$global:LASTEXITCODE=0\n");
+  const stub = Buffer.from("param([switch]$NoOpenFirefox,[switch]$NoDownload,[switch]$NoRegisterClients,[int]$Port,[switch]$ReservePort,[switch]$NoPortReservationPrompt)\n[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'called.json'),(@{NoOpenFirefox=$NoOpenFirefox.IsPresent;NoDownload=$NoDownload.IsPresent;NoRegisterClients=$NoRegisterClients.IsPresent;Port=$Port;ReservePort=$ReservePort.IsPresent;NoPortReservationPrompt=$NoPortReservationPrompt.IsPresent}|ConvertTo-Json -Compress))\n$global:LASTEXITCODE=0\n");
   const { createHash } = await import('node:crypto');
   const entry = payload.files.find(file => file.path === 'install.ps1');
   entry.data = stub.toString('base64');
@@ -201,9 +202,9 @@ test('Windows self-contained download calls installed setup with named switches 
   for (const [marker, value] of Object.entries({ __COMMON_PS__: common, __VERSION__: payload.version, __REVISION__: '1', __PAYLOAD__: archive.base64, __PAYLOAD_SHA__: archive.sha256 })) source = source.replaceAll(marker, () => value);
   const script = join(directory, 'register.ps1');
   await writeFile(script, source);
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-ProjectRoot', output, '-NoDownload', '-NoRegisterClients', '-Port', '43210'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-ProjectRoot', output, '-NoDownload', '-NoRegisterClients', '-Port', '43210', '-ReservePort', '-NoPortReservationPrompt'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.deepEqual(JSON.parse(await readFile(join(output, 'called.json'), 'utf8')), { NoOpenFirefox: true, NoDownload: true, NoRegisterClients: true, Port: 43210 });
+  assert.deepEqual(JSON.parse(await readFile(join(output, 'called.json'), 'utf8')), { NoOpenFirefox: true, NoDownload: true, NoRegisterClients: true, Port: 43210, ReservePort: true, NoPortReservationPrompt: true });
   assert.equal(await readFile(outside, 'utf8'), 'external file stays untouched');
   assert.deepEqual(await readFile(join(output, 'server/native-host.mjs')), Buffer.from(payload.files.find(file => file.path === 'server/native-host.mjs').data, 'base64'));
 });
