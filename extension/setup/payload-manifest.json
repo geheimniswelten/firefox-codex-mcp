@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "version": "1.0.9",
   "registrationRevision": 1,
-  "archiveSha256": "dcb63fe94230fc1a0c7a71dd4c657a0ceb6a677256b74678449896c59f7df6c5",
+  "archiveSha256": "349a2844399b533267fcbe4d0d82b92620452fd8778db7d731859a964a196ec1",
   "files": [
     {
       "path": "LICENSE.md",
@@ -10,7 +10,7 @@
     },
     {
       "path": "PORT_RESERVATION.md",
-      "sha256": "c36843ad373cf367d47595c6beb9b586608fa4451990c3dcf7f88e3e669d9776"
+      "sha256": "a5e2ad08234f5307c961eb43289fea407f21c7164ff1867843227a2e6069eb4d"
     },
     {
       "path": "PROTOCOL.md",
@@ -62,7 +62,7 @@
     },
     {
       "path": "scripts/ports.mjs",
-      "sha256": "7de33c524182ade887a2b7c41310bd5edc5d3d87c43ea0bd4dde6292e7e1f3e7"
+      "sha256": "3d0882c82ecb29b9c6735d9e3c432ebc73b0e2e0a7f8ba9b50c632b638f317d4"
     },
     {
       "path": "scripts/registration.mjs",
@@ -74,11 +74,11 @@
     },
     {
       "path": "scripts/windows-port-reservation.cs",
-      "sha256": "7a5fd49722a04d31aed2221c2f39648062862d3e3ab0339e5a14464434867b52"
+      "sha256": "f289091cd18462aca4e55d96b8c1837968251a26e6a5a17eb9c1d4b87e9bfdc0"
     },
     {
       "path": "scripts/windows-port-reservation.ps1",
-      "sha256": "a03aa8c56888cbea79322a86c0da1b0f6229c5b84d30d0c6712cee76c3fbbb10"
+      "sha256": "3280719d23963fe4c03ed409f707a116f6ae3076c00ed27ead57e8c50cb474c3"
     },
     {
       "path": "server/bridge-client.mjs",
@@ -90,7 +90,7 @@
     },
     {
       "path": "server/diagnostics.mjs",
-      "sha256": "a2ebc9c62d4f94aa193dcadd1b46f708d1f6d7dc0dd10ea16bc3cdcdf90cfc18"
+      "sha256": "48fc73cb6e7597d43cd080eb22d4a00640088264cab6437eedfadc88be40240c"
     },
     {
       "path": "server/exports.mjs",
@@ -110,11 +110,11 @@
     },
     {
       "path": "server/port-reservation.mjs",
-      "sha256": "295465388c7eb1e0bb07c6844e9a93e24b782294d4f09c87527d34e7b4a26e6d"
+      "sha256": "869626b3bb98c7666b18824d05c79af00e3778f0d1964eaa7d5782f95f3520c1"
     },
     {
       "path": "server/tools.mjs",
-      "sha256": "af16e0aec3557983f8cf02c40470a57cb2c432ed5993c92ce6f2d6a58656044b"
+      "sha256": "dd647a740c01e06a89e8ae9109fd5e4b184af98d2144a8f2ddc1a67f703dcf53"
     },
     {
       "path": "uninstall.ps1",
