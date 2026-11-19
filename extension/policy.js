@@ -321,8 +321,8 @@
       }
       return token;
     }
-    async commitFiveDay(tab, grant, revision, tabRevision, assertPending, signal) {
-      assertPending(); await this.assertTarget(tab.id, tab.url, revision); assertPending();
+    async commitFiveDay(tab, grant, revision, tabRevision, assertPending, signal, allowDiscarded) {
+      assertPending(); await this.assertTarget(tab.id, tab.url, revision, allowDiscarded); assertPending();
       if (!grant.token) { await this.assertScope(tab.id, tab.url, revision); assertPending(); }
       if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Freigabe wurde vor dem Speichern widerrufen.");
       if (tabRevision !== (this.tabRevisions.get(tab.id) || 0)) throw accessError("PAGE_CHANGED", "Die Seite wurde vor dem Speichern gewechselt.");
@@ -340,7 +340,7 @@
       signal?.addEventListener("abort", rollback, { once: true });
       try {
         await this.persistApprovals();
-        assertPending(); await this.assertTarget(tab.id, tab.url, revision); assertPending();
+        assertPending(); await this.assertTarget(tab.id, tab.url, revision, allowDiscarded); assertPending();
         if (revision !== this.revision) throw accessError("PERMISSION_CHANGED", "Die Freigabe wurde während des Speicherns widerrufen.");
         if (tabRevision !== (this.tabRevisions.get(tab.id) || 0)) throw accessError("PAGE_CHANGED", "Die Seite wurde während des Speicherns gewechselt.");
         if (grant.token ? this.tabGrants.get(tab.id) !== grant : this.globalApproval !== grant) throw accessError("CONTENT_DENIED", "Die Freigabe wurde während des Speicherns widerrufen.");
@@ -349,12 +349,12 @@
       } catch (error) { rollback(); throw error; }
       finally { signal?.removeEventListener("abort", rollback); }
     }
-    async assertTarget(tabId, expectedUrl, revision) {
+    async assertTarget(tabId, expectedUrl, revision, allowDiscarded = false) {
       if (!this.settings.enabled) throw accessError("MCP_DISABLED", "MCP-Zugriff ist deaktiviert.");
       if (revision !== this.revision) throw accessError("PERMISSION_CHANGED", "Die Zugriffseinstellungen wurden während der Anfrage geändert.");
       const tab = await this.browser.tabs.get(tabId);
       if (tab.url !== expectedUrl) throw accessError("PAGE_CHANGED", "Die Tab-URL hat sich während der Freigabe geändert. Erneut anfragen.");
-      if (tab.discarded) throw accessError("TAB_DISCARDED", "Der Tab wurde entladen. Zuerst ausdrücklich reload_tabs aufrufen.");
+      if (tab.discarded && !allowDiscarded) throw accessError("TAB_DISCARDED", "Der Tab wurde entladen. Zuerst ausdrücklich reload_tabs aufrufen.");
       if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Zugriffseinstellungen wurden während der Anfrage geändert.");
       const bypass = this.siteBypass(tab.url);
       if (!bypass && this.settings.contentMode === "ask-five-days" && this.persistFailure) throw this.persistFailure;
@@ -381,8 +381,8 @@
       catch { this.revokeToken(grant.token); throw accessError("CONTENT_DENIED", "Die gespeicherte Tab-Identität kann nicht mehr geprüft werden."); }
       if (token !== grant.token) { this.revokeToken(grant.token); throw accessError("CONTENT_DENIED", "Die gespeicherte Tab-Identität wurde geändert."); }
     }
-    async assertScope(tabId, expectedUrl, revision = this.revision, authorization) {
-      const tab = await this.assertTarget(tabId, expectedUrl, revision);
+    async assertScope(tabId, expectedUrl, revision = this.revision, authorization, allowDiscarded) {
+      const tab = await this.assertTarget(tabId, expectedUrl, revision, allowDiscarded);
       const grant = this.authorizations.get(authorization);
       if (grant?.siteRule) {
         this.assertGrant(grant, tabId, expectedUrl, revision);
@@ -401,40 +401,42 @@
       if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Zugriffseinstellungen wurden während der Anfrage geändert.");
       return tab;
     }
-    async authorize(tab, authorization = {}, { signal, operation } = {}) {
+    async authorize(tab, authorization = {}, { signal, operation, allowDiscarded = false } = {}) {
       const assertPending = () => { if (signal?.aborted) throw signal.reason || accessError("CANCELLED", "Die Inhaltsanfrage wurde abgebrochen."); };
       assertPending();
       this.authorizations.delete(authorization);
       const revision = this.revision, tabRevision = this.tabRevisions.get(tab.id) || 0;
-      await this.assertTarget(tab.id, tab.url, revision);
+      const target = () => this.assertTarget(tab.id, tab.url, revision, allowDiscarded);
+      const scope = grant => this.assertScope(tab.id, tab.url, revision, grant, allowDiscarded);
+      await target();
       assertPending();
       if (this.siteBypass(tab.url)) {
         this.authorizations.set(authorization, { tabId: tab.id, url: tab.url, revision, tabRevision, expiresAt: null, siteRule: true });
-        const current = await this.assertScope(tab.id, tab.url, revision, authorization); assertPending(); return current;
+        const current = await scope(authorization); assertPending(); return current;
       }
       const mode = this.settings.contentMode;
       const finiteMode = mode === "ask-session" || mode === "ask-five-days";
       if (mode === "deny") throw accessError("CONTENT_DENIED", "Inhaltszugriff ist in der Erweiterung gesperrt.");
       const tabScoped = this.settings.contentScope === "active" && !await this.isActiveTab(tab.id);
       assertPending();
-      await this.assertTarget(tab.id, tab.url, revision);
+      await target();
       assertPending();
       if (this.settings.contentScope === "active") {
         const grant = this.tabGrants.get(tab.id);
         if (finiteMode && !grant?.pending && grant?.url === tab.url && grant.revision === revision && grant.tabRevision === tabRevision && this.now() < grant.expiresAt) {
           if (!grant.token || await this.tabToken(tab.id) === grant.token) {
             this.authorizations.set(authorization, grant);
-            const approved = await this.assertScope(tab.id, tab.url, revision, authorization); assertPending(); return approved;
+            const approved = await scope(authorization); assertPending(); return approved;
           }
         }
       }
       if (!tabScoped) {
-        await this.assertScope(tab.id, tab.url, revision);
+        await scope();
         assertPending();
-        if (mode === "allow") return this.assertScope(tab.id, tab.url, revision);
+        if (mode === "allow") return scope();
         if (finiteMode && !this.globalApproval?.pending && this.expiresAt !== null && this.now() < this.expiresAt) {
           if (mode === "ask-five-days") this.bindFiveDayGlobal(tab, authorization, revision, tabRevision);
-          return this.assertScope(tab.id, tab.url, revision, authorization);
+          return scope(authorization);
         }
       }
       if (this.promptPending || this.globalApproval?.pending || [...this.tabGrants.values()].some(grant => grant.pending)) throw accessError("APPROVAL_BUSY", "Eine Inhaltsfreigabe wartet bereits auf eine Antwort oder wird gespeichert.");
@@ -446,7 +448,7 @@
         assertPending();
         if (!allowed) throw accessError("CONTENT_DENIED", "Inhaltszugriff wurde nicht freigegeben.");
         if (tabScoped) {
-          await this.assertTarget(tab.id, tab.url, revision);
+          await target();
           assertPending();
           if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Freigabe wurde während der Anfrage widerrufen.");
           if (tabRevision !== (this.tabRevisions.get(tab.id) || 0)) throw accessError("PAGE_CHANGED", "Die Seite wurde während der Freigabe gewechselt. Erneut anfragen.");
@@ -455,30 +457,30 @@
           let rollback;
           if (mode === "ask-five-days") {
             grant.issuedAt = issuedAt; grant.token = await this.tabToken(tab.id); assertPending();
-            rollback = await this.commitFiveDay(tab, grant, revision, tabRevision, assertPending, signal);
+            rollback = await this.commitFiveDay(tab, grant, revision, tabRevision, assertPending, signal, allowDiscarded);
           } else if (mode === "ask-session") this.tabGrants.set(tab.id, grant);
           this.authorizations.set(authorization, grant);
-          try { const approved = await this.assertScope(tab.id, tab.url, revision, authorization); assertPending(); return approved; }
+          try { const approved = await scope(authorization); assertPending(); return approved; }
           catch (error) { rollback?.(); throw error; }
         }
-        const current = await this.assertScope(tab.id, tab.url, revision);
+        const current = await scope();
         assertPending();
         if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Freigabe wurde während der Anfrage widerrufen.");
         if (mode === "ask-session") this.expiresAt = this.now() + SESSION_MS;
         if (mode === "ask-five-days") {
           if (tabRevision !== (this.tabRevisions.get(tab.id) || 0)) throw accessError("PAGE_CHANGED", "Die Seite wurde während der Freigabe gewechselt. Erneut anfragen.");
           const issuedAt = acceptedAt;
-          const rollback = await this.commitFiveDay(tab, { issuedAt, expiresAt: issuedAt + FIVE_DAYS_MS }, revision, tabRevision, assertPending, signal);
+          const rollback = await this.commitFiveDay(tab, { issuedAt, expiresAt: issuedAt + FIVE_DAYS_MS }, revision, tabRevision, assertPending, signal, allowDiscarded);
           try {
             this.bindFiveDayGlobal(tab, authorization, revision, tabRevision);
-            const approved = await this.assertScope(tab.id, tab.url, revision, authorization); assertPending(); return approved;
+            const approved = await scope(authorization); assertPending(); return approved;
           } catch (error) { rollback(); throw error; }
         }
         return current;
       } finally { this.promptPending = false; }
     }
-    async assertAfterRead(tabId, url, revision, authorization) {
-      const tab = await this.assertScope(tabId, url, revision, authorization);
+    async assertAfterRead(tabId, url, revision, authorization, { allowDiscarded = false } = {}) {
+      const tab = await this.assertScope(tabId, url, revision, authorization, allowDiscarded);
       if (revision !== this.revision || !this.settings.enabled) throw accessError("PERMISSION_CHANGED", "Die Freigabe wurde während der Anfrage widerrufen.");
       const grant = this.authorizations.get(authorization);
       if (grant) this.assertGrant(grant, tabId, url, revision);

@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
 import '../extension/tab-search.js';
 import '../extension/wait.js';
+import '../extension/content-search.js';
 import '../extension/core.js';
 import '../extension/policy.js';
 const { createService, SESSION_KEY, boundResponse, validate } = globalThis.FirefoxBridgeCore;
@@ -132,6 +133,85 @@ function mockBrowser(initial = []) {
   };
   return browser;
 }
+
+test('content search reads only the approved HTML of selected discarded tabs', async t => {
+  const parser = await readFile(new URL('../extension/vendor/content-search-parser.js', import.meta.url), 'utf8');
+  globalThis.FirefoxBridgeHtmlParser = vm.runInNewContext(parser + '\nFirefoxBridgeHtmlParser;');
+  const browser = mockBrowser([
+    { id: 1, discarded: true, url: 'https://example.com/1' },
+    { id: 2, discarded: true, url: 'https://example.com/2' },
+    { id: 3, discarded: true, url: 'https://blocked.test/3' },
+  ]);
+  const prompts = [], requests = [];
+  const settings = { contentMode: 'ask-every-time', contentScope: 'active' };
+  const policy = new ContentAccess(browser, {
+    settings,
+    siteRules: { blocked: [{ type: 'domain', value: 'blocked.test' }] },
+    requestApproval: async request => { prompts.push(request.tabId); return request.tabId !== 2; }
+  });
+  const service = createService(browser, {
+    contentAccess: policy,
+    fetchPage: async (url, init) => {
+      requests.push(url);
+      assert.equal(init.credentials, 'omit');
+      assert.equal(init.redirect, 'error');
+      assert.equal(init.cache, 'no-store');
+      return new Response('<title>Portal</title><meta property="og:title" content="A &amp; B"><meta name="author" content="Beispielkanal">' +
+        '<p>irrelevant</p><script>document.body.append("Dynamischer Treffer")</script>', { headers: { 'Content-Type': 'text/html' } });
+    }
+  });
+  t.after(() => { service.tracker.stop(); policy.windowTracker.stop(); });
+  const found = await service.handle('search_tab_contents', { tabIds: [1, 2, 3], query: 'beispielkanal' });
+  assert.deepEqual(prompts, [1, 2]);
+  assert.deepEqual(requests, ['https://example.com/1']);
+  assert.deepEqual(found.results.map(result => result.error?.code ?? [result.source, result.title, result.author, result.match.field]),
+    [['fetched-html', 'A & B', 'Beispielkanal', 'author'], 'CONTENT_DENIED', 'SITE_BLOCKED']);
+  assert.equal((await service.handle('search_tab_contents', { tabIds: [1], query: 'Dynamischer Treffer' })).matches, 0);
+  assert.equal(found.incomplete, true);
+  assert.ok([...browser.tabMap.values()].every(tab => tab.discarded));
+  assert.ok(!browser.calls.some(([method]) => ['executeScript', 'reload', 'discard', 'remove'].includes(method)));
+});
+
+test('render search closes one temporary tab before opening the next, including on cancellation', async t => {
+  const browser = mockBrowser([
+    { id: 1, discarded: true, url: 'https://example.com/1' },
+    { id: 2, discarded: true, url: 'https://example.com/2' },
+  ]);
+  const policy = new ContentAccess(browser, { settings: { contentMode: 'allow', contentScope: 'all' } });
+  const create = browser.tabs.create.bind(browser.tabs), remove = browser.tabs.remove.bind(browser.tabs);
+  const operations = [];
+  browser.tabs.create = options => {
+    operations.push(['create', options.url]);
+    assert.equal(options.active, false);
+    assert.equal(options.muted, true);
+    assert.equal(browser.tabMap.size, 2, 'only one temporary tab may be open');
+    return create({ ...options, status: 'complete', discarded: false });
+  };
+  browser.tabs.remove = async id => {
+    assert.ok(id > 2);
+    operations.push(['remove', (await browser.tabs.get(id)).url]);
+    await remove(id);
+  };
+  browser.tabs.executeScript = async id => [{ url: (await browser.tabs.get(id)).url, title: 'Dynamic', meta: {}, json: [], text: 'Dynamischer Treffer', truncated: false }];
+  const service = createService(browser, { contentAccess: policy, fetchPage: () => assert.fail('The render mode never fetches static HTML') });
+  t.after(() => { service.tracker.stop(); policy.windowTracker.stop(); });
+  const search = context => service.handle('search_tab_contents', { tabIds: [1, 2], query: 'Dynamischer Treffer', discardedMode: 'render' }, context);
+  const result = await search();
+  assert.deepEqual(result.results.map(row => [row.tabId, row.source, row.matched]), [[1, 'background-dom', true], [2, 'background-dom', true]]);
+  assert.deepEqual(operations, [
+    ['create', 'https://example.com/1'], ['remove', 'https://example.com/1'],
+    ['create', 'https://example.com/2'], ['remove', 'https://example.com/2'],
+  ]);
+  operations.length = 0;
+  const cancel = new AbortController();
+  browser.tabs.executeScript = async () => {
+    cancel.abort(Object.assign(new Error('cancelled'), { code: 'CANCELLED' }));
+    return [];
+  };
+  await assert.rejects(search({ signal: cancel.signal }), { code: 'CANCELLED' });
+  assert.deepEqual(operations, [['create', 'https://example.com/1'], ['remove', 'https://example.com/1']]);
+  assert.deepEqual([...browser.tabMap.values()].map(tab => [tab.id, tab.discarded]), [[1, true], [2, true]]);
+});
 
 test('tab search filters the full inventory before sorting and paginating without waking tabs', async () => {
   const unrelated = Array.from({ length: 600 }, (_, index) => ({ id: index + 1, title: `Other ${index}`, url: 'https://other.test/' }));

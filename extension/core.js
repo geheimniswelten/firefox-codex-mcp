@@ -32,6 +32,7 @@
     list_groups: ["windowId"], group_tabs: ["tabIds", "groupId", "windowId", "title", "color", "collapsed"],
     ungroup_tabs: ["tabIds"], update_group: ["groupId", "title", "color", "collapsed"], move_group: ["groupId", "windowId", "index"],
     read_content: ["tabId", "format", "selector", "maxChars", "includeLinks"],
+    search_tab_contents: ["tabIds", "query", "caseSensitive", "discardedMode"],
     read_dom: ["tabId", "selector", "visibleOnly", "limit", "offset", "maxChars"],
     interact: ["tabId", "documentId", "elementId", "action", "value", "checked"],
     wait_for: ["tabId", "url", "selector", "imagesLoaded", "fontsLoaded", "loadComplete", "timeoutMs"],
@@ -57,6 +58,11 @@
     if (method === "search_history") {
       if (!globalThis.FirefoxBridgeHistory) throw new BridgeError("UNSUPPORTED", "Chroniksuche benötigt die aktualisierte Firefox-Erweiterung.");
       globalThis.FirefoxBridgeHistory.validate(p); return;
+    }
+    if (method === "search_tab_contents") {
+      if (!globalThis.FirefoxBridgeContentSearch) throw new BridgeError("UNSUPPORTED", "Inhaltssuche benötigt die aktualisierte Firefox-Erweiterung.");
+      globalThis.FirefoxBridgeContentSearch.validate(p);
+      return;
     }
     if (method.includes("bookmark")) {
       if (!globalThis.FirefoxBridgeBookmarks) throw new BridgeError("UNSUPPORTED", "Lesezeichen benötigen die aktualisierte Firefox-Erweiterung.");
@@ -256,6 +262,7 @@
     const history = globalThis.FirefoxBridgeHistory?.createHistory(browser, searchOptions);
     const bookmarks = globalThis.FirefoxBridgeBookmarks?.createBookmarks(browser, searchOptions);
     const dom = globalThis.FirefoxBridgeDom?.createDom(browser, options);
+    const contentSearch = globalThis.FirefoxBridgeContentSearch?.createSearch(browser, options);
     const exporting = new Set();
     const ready = tracker.start();
     const groupApi = () => {
@@ -468,6 +475,7 @@
           } finally { exporting.delete(p.tabId); }
         }
         case "wait_for": return globalThis.FirefoxBridgeWait.waitFor(browser, p, { contentAccess: options.contentAccess, assertLive: context.assertLive, signal: context.signal });
+        case "search_tab_contents": return contentSearch(p, context);
         case "read_content": {
           let tab = await browser.tabs.get(p.tabId);
           if (tab.discarded) throw new BridgeError("TAB_DISCARDED", "Tab ist entladen. Erst ausdrücklich reload_tabs aufrufen, dann erneut lesen.");

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "version": "1.0.9",
   "registrationRevision": 1,
-  "archiveSha256": "349a2844399b533267fcbe4d0d82b92620452fd8778db7d731859a964a196ec1",
+  "archiveSha256": "fd019fd927365a34aea63a1cbc99e7c4c47e2785daa3ace8c0251779c0908051",
   "files": [
     {
       "path": "LICENSE.md",
@@ -10,15 +10,15 @@
     },
     {
       "path": "PORT_RESERVATION.md",
-      "sha256": "a5e2ad08234f5307c961eb43289fea407f21c7164ff1867843227a2e6069eb4d"
+      "sha256": "c36843ad373cf367d47595c6beb9b586608fa4451990c3dcf7f88e3e669d9776"
     },
     {
       "path": "PROTOCOL.md",
-      "sha256": "713b0f87bbdb60a66264d0d2f5f851aa40f6a4d18ee4dc5766087bf914f1039e"
+      "sha256": "804d3236b85073196695cc4adb274d62d86748ffce9503640f99b5adb60f045b"
     },
     {
       "path": "README.md",
-      "sha256": "021da95b8c0b34ebbf8980a52a9c5087cf714175bb55078f999226a5ef84ecdb"
+      "sha256": "33001a7705fd4e8dee49c1cf2453f9cb012f55271d415ed29c9afb37d432ffef"
     },
     {
       "path": "install.ps1",
@@ -26,11 +26,11 @@
     },
     {
       "path": "package-lock.json",
-      "sha256": "12b6f644faf8dabed06767e7bf6a03c41e1ec4e377d4ef99b43f4ff488a392e0"
+      "sha256": "a3f7f938d52d65c08060053d6545785a5067fc01d2d663ae580e0764061d9cd9"
     },
     {
       "path": "package.json",
-      "sha256": "a11fac6d6a5440318105d838af7e7f3a35d61816497d40ce44db14bd24c13334"
+      "sha256": "292d4cf3df379aa3c3627b370e467bc3fbf9ffbb8f9c0c447aea8843ce25bcb5"
     },
     {
       "path": "scripts/client-config.mjs",
@@ -62,7 +62,7 @@
     },
     {
       "path": "scripts/ports.mjs",
-      "sha256": "3d0882c82ecb29b9c6735d9e3c432ebc73b0e2e0a7f8ba9b50c632b638f317d4"
+      "sha256": "7de33c524182ade887a2b7c41310bd5edc5d3d87c43ea0bd4dde6292e7e1f3e7"
     },
     {
       "path": "scripts/registration.mjs",
@@ -74,15 +74,15 @@
     },
     {
       "path": "scripts/windows-port-reservation.cs",
-      "sha256": "f289091cd18462aca4e55d96b8c1837968251a26e6a5a17eb9c1d4b87e9bfdc0"
+      "sha256": "7a5fd49722a04d31aed2221c2f39648062862d3e3ab0339e5a14464434867b52"
     },
     {
       "path": "scripts/windows-port-reservation.ps1",
-      "sha256": "3280719d23963fe4c03ed409f707a116f6ae3076c00ed27ead57e8c50cb474c3"
+      "sha256": "a03aa8c56888cbea79322a86c0da1b0f6229c5b84d30d0c6712cee76c3fbbb10"
     },
     {
       "path": "server/bridge-client.mjs",
-      "sha256": "01a7051b9259802f9f7ddc891f6efc8a8e48e76d85724c526e1c90a5a43b2ee2"
+      "sha256": "e33aa6075e03b8913489ff8531ca1c2e732decd4c50c851d582e37a92d347004"
     },
     {
       "path": "server/config.mjs",
@@ -90,7 +90,7 @@
     },
     {
       "path": "server/diagnostics.mjs",
-      "sha256": "48fc73cb6e7597d43cd080eb22d4a00640088264cab6437eedfadc88be40240c"
+      "sha256": "a2ebc9c62d4f94aa193dcadd1b46f708d1f6d7dc0dd10ea16bc3cdcdf90cfc18"
     },
     {
       "path": "server/exports.mjs",
@@ -106,15 +106,15 @@
     },
     {
       "path": "server/native-host.mjs",
-      "sha256": "99f2a4e7238dc784f9aa91a9aff5fc35d03f12b48b24b97719e0d6e119b3a629"
+      "sha256": "f66cf3417787792b2b5ad92b9d9e5f86c9bdc7989cac17f62cb955aca9acae2e"
     },
     {
       "path": "server/port-reservation.mjs",
-      "sha256": "869626b3bb98c7666b18824d05c79af00e3778f0d1964eaa7d5782f95f3520c1"
+      "sha256": "295465388c7eb1e0bb07c6844e9a93e24b782294d4f09c87527d34e7b4a26e6d"
     },
     {
       "path": "server/tools.mjs",
-      "sha256": "dd647a740c01e06a89e8ae9109fd5e4b184af98d2144a8f2ddc1a67f703dcf53"
+      "sha256": "154b4044aa8b8079be05c339057cf5b0d6c2dfba8ea52609c4a494f6dabeb9e1"
     },
     {
       "path": "uninstall.ps1",

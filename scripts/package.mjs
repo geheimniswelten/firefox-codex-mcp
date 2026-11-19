@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSetupDownloads } from './build-setup-downloads.mjs';
 import { zip } from './package-zip.mjs';
 import { buildHtmlVendor } from './single-file-build.mjs';
+import { buildContentSearchParser } from './build-content-search-parser.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
@@ -24,6 +25,7 @@ async function collect(base, directory = base) {
 
 try {
   await buildHtmlVendor(root);
+  await buildContentSearchParser(root);
   await buildSetupDownloads(root);
   await mkdir(dist, { recursive: true });
   const extensionFiles = await collect(join(root, 'extension'));

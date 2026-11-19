@@ -10,7 +10,7 @@ import { managePortReservation } from './port-reservation.mjs';
 export const HOST_VERSION = '1.0.9';
 export const PROTOCOL_VERSION = 1;
 
-const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','search_history','list_bookmark_folders','search_bookmarks','create_bookmark','update_bookmark','move_bookmark','delete_bookmark','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','read_dom','interact','wait_for','save_png','save_html','save_pdf','export_chunk','export_release']);
+const METHODS = new Set(['status','get_current','list_windows','list_extensions','list_tabs','search_history','list_bookmark_folders','search_bookmarks','create_bookmark','update_bookmark','move_bookmark','delete_bookmark','get_tabs','create_tab','update_tab','set_muted','close_tabs','move_tabs','discard_tabs','reload_tabs','create_window','update_window','close_window','list_groups','group_tabs','ungroup_tabs','update_group','move_group','read_content','search_tab_contents','read_dom','interact','wait_for','save_png','save_html','save_pdf','export_chunk','export_release']);
 for (const method of DIAGNOSTIC_METHODS) METHODS.add(method);
 const error = (code, message) => ({ error: { code, message } });
 const waitTimeoutMs = params => Number.isInteger(params.timeoutMs) && params.timeoutMs >= 1 && params.timeoutMs <= 120_000 ? params.timeoutMs : 10_000;
@@ -31,7 +31,7 @@ export function createBridge({ port, token, registration = null, input = process
   const expectedAuth = Buffer.from(`Bearer ${token}`);
   const send = message => output.write(encodeNativeMessage(message));
   const cancelWait = (id, method) => {
-    if (!['wait_for', 'search_history', 'read_dom', 'interact'].includes(method) || closed || !ready) return;
+    if (!['wait_for', 'search_history', 'search_tab_contents', 'read_dom', 'interact'].includes(method) || closed || !ready) return;
     try { send({ type: 'cancel', id }); } catch { /* Caller cleanup does not depend on native output. */ }
   };
   const cancelAll = () => {
@@ -116,7 +116,7 @@ export function createBridge({ port, token, registration = null, input = process
       if (response.destroyed || request.aborted) return;
       if (pending.size >= 64) { reply(response, 429, error('BUSY', 'Too many pending requests.')); return; }
       const id = randomUUID();
-      const requestTimeout = body.method === 'wait_for' ? waitTimeoutMs(body.params) + 5_000 : body.method === 'interact' ? exportTimeoutMs : ['read_content','read_dom'].includes(body.method) ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(body.method) ? exportTimeoutMs : timeoutMs;
+      const requestTimeout = body.method === 'wait_for' ? waitTimeoutMs(body.params) + 5_000 : body.method === 'interact' ? exportTimeoutMs : ['read_content','read_dom','search_tab_contents'].includes(body.method) ? contentTimeoutMs : ['save_png', 'save_html', 'save_pdf'].includes(body.method) ? exportTimeoutMs : timeoutMs;
       const controller = new AbortController();
       const timer = setTimeout(() => {
         const entry = pending.get(id);

@@ -172,12 +172,12 @@ Alle 41 Werkzeugnamen haben das Präfix `firefox_`:
 | Tabs | `create_tab`, `update_tab`, `set_muted`, `close_tabs`, `move_tabs`, `discard_tabs`, `reload_tabs` |
 | Fenster | `create_window`, `update_window`, `close_window` |
 | Native Gruppen | `list_groups`, `group_tabs`, `ungroup_tabs`, `update_group`, `move_group` |
-| Seiteninhalt | `read_content` |
+| Seiteninhalt | `read_content`, `search_tab_contents` |
 | DOM lesen und Seitenelemente bedienen | `read_dom`, `interact` |
 | Auf Seitenzustand warten | `wait_for` |
 | Seitenexport | `save_png`, `save_html`, `save_pdf` |
 
-Die sechs Diagnosewerkzeuge ab **1.0.9** benötigen nur aktives MCP, keine Inhalts- oder Bedienfreigabe. Sie lesen weder DOM noch Seitentext und geben keine Tabtitel, URLs, Netzwerkadressen, Kommandozeilen, Header, Cookies oder Request-Inhalte aus. Browser-Version und Erweiterungsinventar behalten ihre bestehende separate Freigabe; Erweiterungen werden weiterhin über `list_extensions` abgefragt. Weitere Details: [Technische Diagnose](docs/Diagnose.md). Nach dem Update Add-on neu laden und die MCP-Verbindung im KI-Client neu starten, damit der Native Host den neuen Code lädt und alle 41 Werkzeuge bekannt werden.
+Die sechs Diagnosewerkzeuge ab **1.0.9** benötigen nur aktives MCP, keine Inhalts- oder Bedienfreigabe. Sie lesen weder DOM noch Seitentext und geben keine Tabtitel, URLs, Netzwerkadressen, Kommandozeilen, Header, Cookies oder Request-Inhalte aus. Browser-Version und Erweiterungsinventar behalten ihre bestehende separate Freigabe; Erweiterungen werden weiterhin über `list_extensions` abgefragt. Weitere Details: [Technische Diagnose](docs/Diagnose.md). Nach dem Update Add-on neu laden und die MCP-Verbindung im KI-Client neu starten, damit der Native Host den neuen Code lädt und alle 42 Werkzeuge bekannt werden.
 
 Beispiele für Codex: „Liste alle entladenen Firefox-Tabs“, „Finde Tabs mit localhost in der URL“, „Schalte diese drei Tabs stumm“, „Verschiebe die ausgewählten Tabs in ein neues Fenster“, „Fasse den Inhalt des aktiven Tabs zusammen“. IDs zunächst anhand der Übersicht oder einer gezielten Suche auflösen. `list_tabs` unterstützt Fenster, Aktivität, Audio, Stummschaltung, Entladezustand und Gruppe als Filter; Standard sind 100, maximal 500 Tabs pro Seite mit `offset`/`limit`.
 
@@ -207,6 +207,33 @@ Nach diesem Update das Add-on unter `about:debugging#/runtime/this-firefox` **ne
 Der optionale Browsertest `npm run test:firefox-tab-search` prüft die Suche mit echten Firefox-Tabs und Workern in einem eigenen Headless-Testprofil unter `work/`. Er benötigt Firefox und die Entwicklungsabhängigkeit `web-ext`; das normale Benutzerprofil wird nicht verwendet.
 
 `read_content` liefert Text oder HTML aus dem Hauptframe, optional für einen CSS-Selektor und mit Links. Standardlimit: 30.000 Zeichen; Maximum: 100.000. Kürzungen werden angezeigt. Schließen, Navigation, Neuladen und Entladen können ungespeicherte Seitendaten verlieren. Batch-Aktionen liefern Einzelergebnisse und können teilweise erfolgreich sein; nach einem Timeout oder Teilfehler zunächst Zustand prüfen, bevor erneut verändert wird. Parameterdetails stehen in `PROTOCOL.md` und den MCP-Werkzeugschemata.
+
+## Inhalte ausgewählter Tabs durchsuchen
+
+Mit `firefox_search_tab_contents` suchst du nach Text, Seitentitel, Autor oder
+Beschreibung. Wähle 1–20 Tab-IDs, zum Beispiel aus `firefox_list_tabs`.
+Die Inhaltsfreigaben und Seitenfilter gelten wie beim Auslesen einer Seite.
+
+```text
+firefox_search_tab_contents({"tabIds":[145,2720],"query":"Excel"})
+firefox_search_tab_contents({"tabIds":[145],"query":"Excel","discardedMode":"render"})
+```
+
+Geladene Tabs werden im Hauptframe durchsucht. Entladene Tabs bleiben im
+Standardmodus entladen. Der MCP ruft ihre HTML-Antwort ohne Anmeldedaten ab und
+durchsucht sie ohne Seitenskripte, Bilder oder andere nachgeladene Ressourcen.
+Dynamische oder nur nach Anmeldung verfügbare Inhalte können dabei fehlen.
+
+`discardedMode: "render"` ist für die ausdrücklich angeforderte Suche mit
+gerenderter Seite gedacht. Firefox öffnet höchstens einen stummen Hintergrundtab
+gleichzeitig und schließt ihn nach dem Auslesen oder bei einem Abbruch. Er wird
+im Standardkontext des Fensters geladen. Bei Container-Tabs kann daher die
+Anmeldung abweichen. Wird der temporäre Tab ausgewählt, bleibt er geöffnet und
+die Suche stoppt. Die Treffer enthalten die IDs der ursprünglichen Tabs, die
+anschließend gezielt angezeigt werden können.
+
+Die Antwort kennzeichnet Quelle, Kürzungen, Fehler und gegebenenfalls nicht
+mehr geprüfte Tabs. Die Suche baut keinen eigenen Inhaltscache auf.
 
 ## Chronik nach einzelnen Besuchen durchsuchen
 

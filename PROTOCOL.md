@@ -18,7 +18,7 @@ Windows native deregistration needs neither Node nor npm. Optional MCP-client cl
 
 The options UI's setup state distinguishes `disabled`, `pending`, `host_missing`, `connection_error`, `update_required`, `ready` and `unverified`. Current connection plus a registration matching the required revision/protocol/platform confirms `ready`. A saved `lastConfirmation` is historical only and cannot prove the current connection or registration. The registration revision is independent of the extension version. The internal `bridge_reconnect` action rechecks the native connection; it performs no operating-system registration.
 
-Method contract (41 MCP tool names, each with the `firefox_` prefix):
+Method contract (42 MCP tool names, each with the `firefox_` prefix):
 
 | Method | Parameters |
 | --- | --- |
@@ -54,6 +54,7 @@ Method contract (41 MCP tool names, each with the `firefox_` prefix):
 | update_group | {groupId:integer,title?:string,color?:string,collapsed?:boolean} |
 | move_group | {groupId:integer,windowId?:integer,index:integer} |
 | read_content | {tabId:integer,format?:"text"|"html",selector?:string,maxChars?:integer,includeLinks?:boolean} |
+| search_tab_contents | {tabIds:integer[1..20],query:string,caseSensitive?:boolean,discardedMode?:"html"\|"render"} |
 | read_dom | {tabId:integer,selector?:string,visibleOnly?:boolean,limit?:integer,offset?:integer,maxChars?:integer} |
 | interact | {tabId:integer,documentId:UUID,elementId:string,action:"fill"\|"set_checked"\|"select"\|"click",value?:string,checked?:boolean} |
 | wait_for | {tabId:integer,url?:string,selector?:string,imagesLoaded?:boolean,fontsLoaded?:boolean,loadComplete?:boolean,timeoutMs?:integer} |
@@ -66,6 +67,32 @@ List tabs returns `{tabs,total,offset,limit,returned,nextOffset}` (default 100, 
 `list_tabs.query` accepts 1–4096 characters. `searchIn` defaults to `"both"`; a match in either the title or URL is sufficient. `matchMode` defaults to `"contains"` (literal substring matching), and `caseSensitive` defaults to `false`. Explicit `searchIn`, `matchMode` or `caseSensitive` require `query`. With `matchMode:"regex"`, `query` is Firefox's JavaScript `RegExp` source without a `/.../` wrapper; flags are derived from `caseSensitive`. Invalid options or regex syntax return `INVALID_PARAMS`; syntax is checked in Firefox, not Node, because their supported features can differ. Regex evaluation has a one-second deadline and returns `SEARCH_TIMEOUT` when exceeded, rather than partial results. Worker startup or execution failures return `SEARCH_FAILED`.
 
 The extension combines the search with the existing window, state and native-group filters. It matches the original Firefox title and URL before response truncation, sorting and pagination. `total`, `offset` and `nextOffset` count matching tabs only. Search does not activate tabs, wake discarded tabs or access page content. Examples: `firefox_list_tabs({"query":"localhost","searchIn":"url"})` and `firefox_list_tabs({"query":"^https?://localhost(?::[0-9]+)?/","searchIn":"url","matchMode":"regex"})`. After updating, reload the Firefox add-on and restart the client's MCP connection to load the new tool schema.
+
+## Search contents of selected tabs
+
+`search_tab_contents` accepts 1–20 distinct tab IDs and a nonblank literal query
+of up to 512 characters. It normalizes whitespace and ignores case by default.
+Each selected tab goes through the normal page-content approval and site rules.
+
+* `live-dom` searches a loaded main frame.
+* `fetched-html` is the default for discarded tabs. It searches an anonymous
+  HTML GET without redirects or subresources. Private tabs cannot use this mode.
+* `background-dom` requires explicit `discardedMode: "render"`. It renders the
+  same URL in one muted temporary tab at a time, using the window's default
+  browser context. That tab is closed afterward, including on timeout or
+  cancellation. If it was selected, the search stops and leaves it open.
+
+All three modes return the original tab ID. A result includes `source`,
+`matched` and `truncated` or an individual `error`. Matches include a `match`
+with the field and snippet, plus the extracted `title`, `author` and
+`description`, when available. The whole response includes `matches`,
+`unsearchedTabIds`, `incomplete` and `partialFailure`. A static HTML miss
+cannot rule out text inserted by script or available only after login.
+
+Limits are 2 MiB of HTML and 100,000 text characters per tab, 15 seconds per
+page after approval, and 125 seconds per search including approvals. There
+is at most one search in flight. The original tabs are left in place and no
+content is saved by the extension.
 
 ## History searches and stable snapshots
 
@@ -93,7 +120,7 @@ List responses are `{folders|bookmarks,total,returned,offset,limit,nextOffset,un
 
 `delete_bookmark` defaults to `recursive:false`. A nonempty folder returns `FOLDER_NOT_EMPTY` unless explicitly given `recursive:true`; recursive folder deletion uses `bookmarks.removeTree`, while bookmarks, separators and empty nonrecursive folders use `bookmarks.remove`. Success returns `{deleted:true,id,type,recursive,untrustedContent:true}`. `root________`, `toolbar_____`, `menu________`, `unfiled_____` and `mobile______` cannot be updated, moved or deleted (`BOOKMARK_ROOT_PROTECTED`). The internal root is also forbidden as an insertion/move destination; the other fixed roots remain valid destinations for ordinary entries. Moving a folder into itself or a descendant returns `BOOKMARK_CYCLE`. Missing IDs return `BOOKMARK_NOT_FOUND`, a nonfolder parent `BOOKMARK_PARENT_NOT_FOLDER`, managed/unmodifiable nodes `BOOKMARK_UNMODIFIABLE`, missing APIs `UNSUPPORTED`, and failed browser operations `BOOKMARKS_OPERATION_FAILED`. Request liveness is checked immediately before each browser mutation. After the browser mutation succeeds, its concrete outcome is preserved even if the deadline elapsed while waiting; read results are still checked after completion. A browser failure after mutation invocation includes `details:{stateMayHaveChanged:true}`. Inspect current state before retrying and never retry a mutation automatically after an unknown outcome.
 
-The extension manifest requires `history` and `bookmarks` APIs and declares the Firefox data categories `browsingActivity` and `bookmarksInfo`. History/bookmark metadata access operates while MCP is enabled under these extension permissions; page-content approval continues to govern website DOM reads and exports. Reload the add-on and restart the client's MCP connection after updating to discover all 41 tools and activate the new permissions. `npm run test:firefox-history-bookmarks` runs the optional actual-Firefox test in a dedicated headless profile under `work/`, with its own history/bookmark fixtures; it requires Firefox and local `web-ext` development dependencies. Test outcomes are recorded separately in `TESTING.md`.
+The extension manifest requires `history` and `bookmarks` APIs and declares the Firefox data categories `browsingActivity` and `bookmarksInfo`. History/bookmark metadata access operates while MCP is enabled under these extension permissions; page-content approval continues to govern website DOM reads and exports. Reload the add-on and restart the client's MCP connection after updating to discover all 42 tools and activate the new permissions. `npm run test:firefox-history-bookmarks` runs the optional actual-Firefox test in a dedicated headless profile under `work/`, with its own history/bookmark fixtures; it requires Firefox and local `web-ext` development dependencies. Test outcomes are recorded separately in `TESTING.md`.
 
 ## Page exports and waits
 

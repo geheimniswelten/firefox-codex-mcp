@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 const definitions = new Map(TOOL_DEFINITIONS.map(tool => [tool.method, tool]));
 const valid = (method, args) => definitions.get(method).inputSchema.safeParse(args).success;
 
-test('the 41 documented tools have complete annotations and strict object schemas', () => {
-  assert.equal(definitions.size, 41);
+test('the 42 documented tools have complete annotations and strict object schemas', () => {
+  assert.equal(definitions.size, 42);
   for (const tool of definitions.values()) {
     assert.equal(tool.name, `firefox_${tool.method}`);
     assert.ok(tool.description.length > 20);
@@ -25,6 +25,16 @@ test('the 41 documented tools have complete annotations and strict object schema
   assert.match(SERVER_INSTRUCTIONS, /untrusted/);
   assert.match(SERVER_INSTRUCTIONS, /firstSeenAt/);
   assert.match(SERVER_INSTRUCTIONS, /Auto Tab Discard/);
+});
+
+test('content search requires explicit bounded selections and an explicit render mode', () => {
+  assert.ok(valid('search_tab_contents', { tabIds: [1, 2], query: 'Kanal' }));
+  assert.ok(valid('search_tab_contents', { tabIds: [1], query: 'Titel', discardedMode: 'render', caseSensitive: true }));
+  for (const args of [
+    { query: 'Titel' }, { tabIds: [], query: 'Titel' }, { tabIds: [1, 1], query: 'Titel' },
+    { tabIds: Array.from({ length: 21 }, (_, i) => i), query: 'Titel' },
+    { tabIds: [1], query: ' ' }, { tabIds: [1], query: 'Titel', discardedMode: 'reload' },
+  ]) assert.equal(valid('search_tab_contents', args), false);
 });
 
 test('wait conditions require an active predicate and bound timeout and page inputs', () => {

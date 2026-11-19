@@ -1,5 +1,14 @@
 # Prüfstand vom 27. Oktober 2026
 
+## Tab-Inhaltssuche
+
+`npm run test:firefox-tab-content-search` prüft die Suche in einem separaten
+Firefox-Profil mit einem lokalen Testserver. Am 15. November 2026 bestanden in Firefox 160.0 alle
+20 Prüfungen. Im HTML-Modus wurde nur das Dokument abgerufen. Der Render-Modus
+fand den dynamischen Text und schloss temporäre Tabs auch beim Abbruch.
+Die ursprünglichen Tabs blieben entladen. Tests für MCP-Schema, Freigaben
+und sequenzielles Aufräumen stehen unter `test/`.
+
 ## Lesende technische Diagnose (1.0.9)
 
 Der vollständige Lauf mit `node --test --test-concurrency=4 test/*.test.mjs` bestand mit **464 erfolgreichen Tests, 0 Fehlern und 1 übersprungenen Test (465 insgesamt)**. Zwei danach ergänzte Tests für den Timeout während einer nativen Messung und die zusammengesetzte Diagnoseantwort bestanden im erneuten Lauf aller **16 Native-Host-Tests** ebenfalls.

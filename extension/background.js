@@ -231,7 +231,7 @@
     catch (error) { send(target, { id: message.id, error: errorData(error) }); return; }
     if (pendingCount >= 32) { send(target, { id: message.id, error: { code: "BUSY", message: "Zu viele ausstehende Firefox-Anfragen." } }); return; }
     if (waits.has(message.id)) { send(target, { id: message.id, error: { code: "BUSY", message: "Diese Warteanfrage läuft bereits." } }); return; }
-    const controller = ["wait_for", "search_history", "read_dom", "interact"].includes(message.method) ? new AbortController() : null;
+    const controller = ["wait_for", "search_history", "search_tab_contents", "read_dom", "interact"].includes(message.method) ? new AbortController() : null;
     if (controller) waits.set(message.id, controller);
     state.lastAccessAt = Date.now(); pendingCount += 1;
     const activity = beginActivity();
@@ -249,7 +249,7 @@
     };
     // Permission prompts and history scans do not hold tab-control requests in the queue.
     const completed = () => { pendingCount -= 1; if (controller) waits.delete(message.id); finishActivity(activity); };
-    if (["read_content", "read_dom", "interact", "save_png", "save_html", "save_pdf", "wait_for", "search_history"].includes(message.method)) execute().finally(completed);
+    if (["read_content", "read_dom", "interact", "save_png", "save_html", "save_pdf", "wait_for", "search_history", "search_tab_contents"].includes(message.method)) execute().finally(completed);
     else queue = queue.then(execute).catch(() => {}).finally(completed);
   }
   function connect() {
